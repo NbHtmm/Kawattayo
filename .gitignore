@@ -1,0 +1,15 @@
+/build/
+**/bin/
+**/obj/
+.vs/
+/.vscode/
+*.user
+*.suo
+*.exe
+*.code-workspace
+*.log
+cache.json*
+*.pubxml*
+.env*
+*.pfx
+*.pem
