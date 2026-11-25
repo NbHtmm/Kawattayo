@@ -305,11 +305,15 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 登録候補を種類・重複に注意して監視リストへ取り込む。
-    private static (string Path, bool IsFolder, string? Error) InspectPath(string input, bool allowMissingFile)
+    private (string Path, bool IsFolder, string? Error) InspectPath(string input, bool allowMissingFile)
     {
         try
         {
             var path = FileProbe.NormalizeFolder(input);
+            if (__store.IsInternalFile(path))
+            {
+                return (path, false, "アプリ自身のキャッシュは監視できません。");
+            }
             // 存在するディレクトリはファイルではなくフォルダ監視として登録する。
             if (Directory.Exists(path))
             {

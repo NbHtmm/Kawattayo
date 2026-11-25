@@ -6,12 +6,12 @@ internal sealed partial class MainWindow
 {
     // 同じGUIのイベント処理をテスト用キャッシュとファイルで通す。
     /// @brief テスト専用キャッシュで一連の GUI 操作を検証する。
-    internal async Task ExerciseUi(string path, string cache, Action allowOpen, string? previewDirectory)
+    internal async Task ExerciseUi(string path, string cache, Action<bool> setOpen, string? previewDirectory)
     {
         VerifyEmptyLayout(previewDirectory);
         await VerifyManualScan(path, cache);
         VerifyHistoryTheme(path, previewDirectory);
-        await VerifyFileAcknowledgement(path, allowOpen);
+        await VerifyFileAcknowledgement(path, setOpen);
         var folder = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(path)!, "gui-folder")).FullName;
         var child = Directory.CreateDirectory(Path.Combine(folder, "sub")).FullName;
         var changed = Path.Combine(child, "changed.txt");
@@ -20,8 +20,9 @@ internal sealed partial class MainWindow
         File.WriteAllText(stable, "test");
         await VerifyFolderRegistration(path, folder);
         await VerifyFolderTree(folder, child, changed, previewDirectory);
-        await VerifyNestedAcknowledgement(changed, stable, folder);
+        await VerifyNestedAcknowledgement(changed, stable, folder, setOpen);
         await VerifyOutageRecovery(folder, previewDirectory);
+        await VerifyIndependentShares();
         VerifyTrayLifetime();
     }
 
@@ -143,12 +144,12 @@ internal sealed partial class MainWindow
     }
 
     /// @brief ファイルを開けたときだけ未読が消えることを確認する。
-    private async Task VerifyFileAcknowledgement(string path, Action allowOpen)
+    private async Task VerifyFileAcknowledgement(string path, Action<bool> setOpen)
     {
         __verifyFileOpen = _ => false;
         await OpenInboxItem(__inbox.Nodes[0]);
         SelfTest.Check(__state.Items[0].Unread > 0, "failed open does not acknowledge");
-        allowOpen();
+        setOpen(true);
         __verifyFileOpen = p => p == path;
         await OpenInboxItem(__inbox.Nodes[0]);
         __verifyFileOpen = null;
@@ -219,7 +220,7 @@ internal sealed partial class MainWindow
     }
 
     /// @brief フォルダを開いた際に指定範囲だけが既読になることを確認する。
-    private async Task VerifyNestedAcknowledgement(string changed, string stable, string folder)
+    private async Task VerifyNestedAcknowledgement(string changed, string stable, string folder, Action<bool> setOpen)
     {
         await VerifyExplorerDefaultOpen(changed, folder);
         await File.AppendAllTextAsync(changed, "unread again");
@@ -232,6 +233,9 @@ internal sealed partial class MainWindow
         await File.AppendAllTextAsync(stable, "another file");
         await Scan();
         SelfTest.Check(__lastAlertCount == 1, "different nested file notifies independently");
+        await VerifyParentFolderMenu(folder, setOpen);
+        await File.AppendAllTextAsync(changed, "unread after opening parent");
+        await Scan();
         __inbox.SelectedNode = Flatten(__inbox.Nodes).Single(x => x.Tag is InboxRow { Label: "stable.txt" });
         var ackPoint = (GetInboxColumns(__inbox.Width, __inbox.DeviceDpi).Action + 6) | ((__inbox.SelectedNode.Bounds.Top + 5) << 16);
         SendMessage(__inbox.Handle, 0x201, 1, ackPoint);
@@ -248,6 +252,93 @@ internal sealed partial class MainWindow
         await Scan();
         await OpenInboxItem(__inbox.Nodes[0]);
         SelfTest.Check(__inbox.Nodes.Count == 0, "opening root acknowledges its pending changes when enabled");
+    }
+
+    private async Task VerifyParentFolderMenu(string folder, Action<bool> setOpen)
+    {
+        var item = __state.Items.Single(x => x.Path == folder);
+        string changed = Path.Combine("sub", "changed.txt");
+        string stable = Path.Combine("sub", "stable.txt");
+
+        async Task ClickParent()
+        {
+            __inbox.SelectedNode = Flatten(__inbox.Nodes).Single(x => x.Tag is InboxRow { Label: "changed.txt" });
+            __verifyShellMenu = (_, menu) =>
+                menu.Items.Cast<ToolStripItem>().Single(x => x.Text == "親フォルダを開く").PerformClick();
+            try
+            {
+                SendMessage(__inbox.Handle, 0x7b, __inbox.Handle, -1);
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                while (__isOpeningTarget)
+                {
+                    await Task.Delay(10, deadline.Token);
+                }
+            }
+            finally { __verifyShellMenu = null; }
+        }
+
+        setOpen(false);
+        await ClickParent();
+        SelfTest.Check(item.PendingFiles.ContainsKey(changed), "failed parent menu open keeps file unread");
+        setOpen(true);
+        __readOnOpen.Checked = false;
+        await ClickParent();
+        SelfTest.Check(item.PendingFiles.ContainsKey(changed), "parent menu respects read-on-open option");
+        __readOnOpen.Checked = true;
+        await ClickParent();
+        SelfTest.Check(!item.PendingFiles.ContainsKey(changed) && item.PendingFiles.ContainsKey(stable),
+            "successful parent menu open acknowledges only selected file");
+    }
+
+    private async Task VerifyIndependentShares()
+    {
+        var first = new WatchItem { Path = @"\\qa-host\slow-share\slow.txt" };
+        var second = new WatchItem { Path = @"\\qa-host\fast-share\fast.txt", Baseline = ProbeState.Found, Fingerprint = new(1, 1, 1) };
+        __state.Items.AddRange([first, second]);
+        using var release = new ManualResetEventSlim(false);
+        int slowCalls = 0;
+        int fastCalls = 0;
+        __testFileProbe = path =>
+        {
+            if (path == first.Path)
+            {
+                Interlocked.Increment(ref slowCalls);
+                if (!release.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    throw new TimeoutException();
+                }
+                return new(ProbeState.Found, new(1, 1, 1));
+            }
+
+            return path == second.Path
+                ? new(ProbeState.Found, new(1, 1, (ulong)Interlocked.Increment(ref fastCalls) + 1))
+                : FileProbe.Read(path);
+        };
+        var pending = Scan();
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (second.Unread == 0)
+            {
+                await Task.Delay(10, deadline.Token);
+            }
+            SelfTest.Check(Flatten(__inbox.Nodes).Any(x => x.Tag is InboxRow { Label: "fast.txt" }),
+                "fast share is visible in inbox before slow share responds");
+            SelfTest.Check(!pending.IsCompleted, "slow share is still in progress");
+            await Scan().WaitAsync(deadline.Token);
+            SelfTest.Check(slowCalls == 1 && fastCalls == 2 && second.Unread == 2,
+                "next scan skips busy share but polls other share again");
+        }
+        finally
+        {
+            release.Set();
+            await pending;
+            __testFileProbe = null;
+            __state.Items.Remove(first);
+            __state.Items.Remove(second);
+            Save();
+            RefreshRows();
+        }
     }
 
     /// @brief 一時切断と回復時のステータス表示を確認する。

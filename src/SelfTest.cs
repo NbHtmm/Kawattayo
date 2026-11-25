@@ -22,6 +22,7 @@ internal static class SelfTest
             {
                 TestCache(root.FullName, lines);
                 TestPortableStore(root.FullName, lines);
+                TestCacheExclusion(root.FullName, lines);
                 TestDisk(root.FullName, lines);
                 TestFolders(root.FullName, lines, "local");
                 TestSmb(root.FullName, lines);
@@ -108,6 +109,39 @@ internal static class SelfTest
         File.Delete(dest);
         Check(StateStore.BesideExecutable(exeDir).Load().State.PollSeconds == 17 && File.Exists(dest) && File.Exists(dest + ".bak"), "missing portable primary recreated from local backup");
         lines.Add("PASS: isolated portable settings and history, same-directory backup recovery");
+    }
+
+    private static void TestCacheExclusion(string root, List<string> lines)
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(root, "cache-exclusion")).FullName;
+        var sibling = Directory.CreateDirectory(Path.Combine(folder, "user-files")).FullName;
+        var cache = Path.Combine(folder, AppDefaults.CacheFileName);
+        var ownTemporary = cache + ".tmp";
+        var ownRecovered = cache + ".broken-" + Guid.NewGuid().ToString("N");
+        var otherCache = Path.Combine(sibling, AppDefaults.CacheFileName);
+        var store = new StateStore(cache);
+        var now = DateTimeOffset.Now;
+        File.WriteAllText(otherCache, "unrelated user file");
+        store.Save(new AppState());
+        store.Save(new AppState());
+        File.WriteAllText(ownTemporary, "temporary");
+        File.WriteAllText(ownRecovered, "archived");
+
+        var old = new WatchItem { Path = folder, IsFolder = true, Recursive = true };
+        old.ObserveFolder(FolderProbe.Read(folder, true), now);
+        old.PendingFiles[AppDefaults.CacheFileName] = new(AppDefaults.CacheFileName, "更新", now);
+        old.Unread = 1;
+        store.Save(new AppState { Items = [old] });
+
+        var current = store.Load().State.Items.Single();
+        var snapshot = FolderProbe.Read(folder, true, store.IsInternalFile);
+        Check(snapshot.Files?.Keys.SequenceEqual([Path.GetRelativePath(folder, otherCache)]) == true, "exclude only own cache and sidecars");
+        Check(current.Unread == 0 && current.ObserveFolder(snapshot, now) is null, "old cache never produces deletion or leaves synthetic unread");
+        File.AppendAllText(otherCache, "real edit");
+        Check(current.ObserveFolder(FolderProbe.Read(folder, true, store.IsInternalFile), now) is not null, "another folder's same-name file still detected");
+        store.Save(new AppState { Items = [current] });
+        Check(current.ObserveFolder(FolderProbe.Read(folder, true, store.IsInternalFile), now) is null, "saving state does not trigger a change");
+        lines.Add("PASS: self-generated cache files are excluded without hiding same-name user files");
     }
 
     /// @brief 一時環境で永続化またはファイル監視の契約を検証する。
@@ -248,7 +282,7 @@ internal static class SelfTest
         {
             try
             {
-                await window.ExerciseUi(sample, cache, () => allowOpen = true, previewDirectory);
+                await window.ExerciseUi(sample, cache, value => allowOpen = value, previewDirectory);
             }
             catch (Exception ex) { error = ex; Application.ExitThread(); }
         };
@@ -261,7 +295,7 @@ internal static class SelfTest
 
         Check(store.Load().State.Items.First().AcknowledgedAt is not null, "GUI acknowledgment persisted");
         Check(!store.Load().State.KeepInTray, "tray setting persisted");
-        lines.Add("PASS: WinForms, native Shell menu path/commands, click vs double-click and acknowledgement, idle cache preservation, folder target, failed/successful open acknowledgement, mixed drop, per-folder recursion, tray hide/restore and disabled close, persisted options");
+        lines.Add("PASS: WinForms, native Shell menu path/commands, click vs double-click and acknowledgement, idle cache preservation, parent-menu acknowledgment, independent share scheduling, folder target, failed/successful open acknowledgement, mixed drop, per-folder recursion, tray hide/restore and disabled close, persisted options");
     }
 
     /// @brief 削除結果を Win32 エラーとともに検証するためのテスト用 API。

@@ -25,7 +25,7 @@ internal sealed partial class MainWindow
         // ファイル行で親を特定できるときだけ「親フォルダを開く」を追加する。
         if (!row.IsFolder && Path.GetDirectoryName(path) is { } parent)
         {
-            menu.Items.Add("親フォルダを開く", null, async (_, _) => await OpenAndConfirm(item, parent, null));
+            menu.Items.Add("親フォルダを開く", null, async (_, _) => await OpenAndConfirm(item, parent, acknowledge));
         }
 
         menu.Items.Add("コピー", null, async (_, _) => await CopyInboxTarget(path));

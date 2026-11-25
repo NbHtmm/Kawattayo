@@ -8,6 +8,59 @@ internal sealed class StateStore(string file)
 {
     private static readonly JsonSerializerOptions s_s_format = new() { WriteIndented = true }; //!< 設定ファイルのシリアライズ形式。
 
+    // 名前だけでなく保存先の絶対パスを照合し、別フォルダの同名ファイルは監視する。
+    internal bool IsInternalFile(string path)
+    {
+        var name = Path.GetFullPath(path);
+        if (name.Equals(file, StringComparison.OrdinalIgnoreCase) ||
+            name.Equals(file + ".bak", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals(file + ".tmp", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string recoveryPrefix = file + ".broken-";
+        return name.StartsWith(recoveryPrefix, StringComparison.OrdinalIgnoreCase) &&
+            Guid.TryParseExact(name[recoveryPrefix.Length..], "N", out _);
+    }
+
+    // 旧版キャッシュを基準にした初回巡回で、内部ファイルを「消失」と誤通知しない。
+    private AppState RemoveInternalObservations(AppState state)
+    {
+        foreach (var item in state.Items)
+        {
+            if (!item.IsFolder)
+            {
+                if (IsInternalFile(item.Path))
+                {
+                    item.Unread = 0;
+                }
+                continue;
+            }
+
+            if (item.Inventory is { } inventory)
+            {
+                var excluded = inventory.Keys.Where(x => IsInternalFile(Path.Combine(item.Path, x))).ToArray();
+                foreach (var relative in excluded)
+                {
+                    inventory.Remove(relative);
+                }
+                if (excluded.Length != 0)
+                {
+                    item.LatestFileWriteAt = inventory.Count == 0 ? null :
+                        FileChange.GetModifiedTime(inventory.Values.Max(x => x.Modified), DateTimeOffset.Now);
+                }
+            }
+
+            foreach (var relative in item.PendingFiles.Keys.Where(x => IsInternalFile(Path.Combine(item.Path, x))).ToArray())
+            {
+                item.Unread = Math.Max(0, item.Unread - item.PendingFiles[relative].Count);
+                item.PendingFiles.Remove(relative);
+            }
+        }
+        return state;
+    }
+
     /// @brief 指定した実行ディレクトリ内だけで設定を初期化する。
     internal static StateStore BesideExecutable(string directory)
     {
@@ -40,7 +93,7 @@ internal sealed class StateStore(string file)
 
         try
         {
-            return (Read(file), null);
+            return (RemoveInternalObservations(Read(file)), null);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -68,7 +121,7 @@ internal sealed class StateStore(string file)
             ArchivePrimary();
         }
 
-        return (backup, "メインの設定を読み込めなかったため、バックアップから復元しました。");
+        return (RemoveInternalObservations(backup), "メインの設定を読み込めなかったため、バックアップから復元しました。");
     }
 
     /// @brief 破損した本体を別名で保持する。

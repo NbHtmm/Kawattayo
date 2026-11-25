@@ -28,7 +28,7 @@ internal sealed partial class MainWindow : Form
     private readonly Button __pause = new() { AutoSize = true, MinimumSize = new Size(95, 31) }; //!< 巡回の停止と再開を切り替える操作。
     private readonly ToolStripMenuItem __pauseMenu = new(); //!< 巡回の停止と再開を切り替える操作。
     private bool __exiting; //!< 終了後の非同期 UI 更新を抑止するフラグ。
-    private bool __isScanning; //!< 前回の巡回がまだ完了していないことを示す。
+    private bool __isScanning => __activeScanRoots.Count != 0; //!< いずれかの共有先を照会中か。
     private bool __hasUnsavedChanges; //!< 未保存の変更があり保存再試行が必要か。
     private string? __saveError; //!< ステータス欄に表示する直近の失敗理由。
     private DateTimeOffset? __lastPoll; //!< 直近の巡回が終了した時刻。
@@ -212,7 +212,7 @@ internal sealed partial class MainWindow : Form
     private void UpdateStatus()
     {
         __status.Text = __saveError is not null ? $"キャッシュを保存できません：{__saveError}" :
-            (__state.Paused ? "一時停止中" : __isScanning ? "照会中" :
+            (__state.Paused ? "一時停止中" : __isScanning ? $"照会中 {__activeScanRoots.Count}系統 ｜ 最終応答 {Time(__lastPoll)}" :
                 __state.Items.Count == 0 ? "監視対象を追加してください" : $"監視中 ｜ 最終巡回 {Time(__lastPoll)}");
         // 保存エラーがないときは、巡回の失敗理由をステータスに表示する。
         if (__saveError is null && !string.IsNullOrWhiteSpace(__pollError))

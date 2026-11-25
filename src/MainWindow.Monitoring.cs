@@ -4,15 +4,18 @@ namespace ShareFileWatch;
 /// @brief 受信箱と監視のライフサイクルを管理するメイン画面。
 internal sealed partial class MainWindow
 {
-    private int __scanGeneration; //!< 巡回開始後に範囲や監視状態が変わったかを判別する世代番号。
-    private string? __pollError; //!< ステータス欄に表示する直近の失敗理由。
+    private int __scanGeneration; //!< 一時停止をまたいだ照会結果を破棄する世代番号。
+    private string? __pollError;
+    private readonly HashSet<string> __activeScanRoots = new(StringComparer.OrdinalIgnoreCase);
+    private ScanPass? __latestScanPass;
 
-    /// @brief 現在の設定で次の巡回を予約する。
+    // テストから共有先の応答を止められる。通常時は同期 Win32 API をワーカーで実行する。
+    private Func<string, ProbeResult>? __testFileProbe;
+
     private void StartTimer(bool immediate = false)
     {
         __pollTimer.Stop();
-        // 自動巡回を行わない状態では、次のタイマーを予約しない。
-        if (__testMode || __exiting || __isScanning || __state.Paused || __state.Items.Count == 0)
+        if (__testMode || __exiting || __state.Paused || __state.Items.Count == 0)
         {
             return;
         }
@@ -21,108 +24,151 @@ internal sealed partial class MainWindow
         __pollTimer.Start();
     }
 
-    /// @brief 一回の巡回で監視対象を照会して結果をまとめる。
-    private async Task Scan()
+    /// @brief 空いている共有先だけ巡回。応答待ちの共有先は次の周期でも重複実行しない。
+    private Task Scan()
     {
         __pollTimer.Stop();
-        // 終了中・照会中・停止中・対象なしの場合は手動要求でも巡回を開始しない。
-        if (__exiting || __isScanning || __state.Paused || __state.Items.Count == 0)
+        if (__exiting || __state.Paused || __state.Items.Count == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        bool inboxChanged = false;
-        int generation = __scanGeneration;
-        __isScanning = true;
+        // 同じ UNC 共有（ローカル・割当ドライブはドライブ単位）への照会は直列に保つ。
+        var groups = __state.Items
+            .Select(x => new ScanTarget(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision))
+            .GroupBy(x => Path.TrimEndingDirectorySeparator(Path.GetPathRoot(x.Path)!), StringComparer.OrdinalIgnoreCase)
+            .Where(x => __activeScanRoots.Add(x.Key))
+            .ToArray();
+
+        // 応答が返るのを待たずに次周期を予約する。遅い共有先以外は次周期でも巡回できる。
+        StartTimer();
+        if (groups.Length == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var pass = __latestScanPass = new ScanPass();
+        __lastAlertCount = 0;
         __pollError = null;
         UpdateStatus();
-        var targets = __state.Items.Select(x => (x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision)).ToArray();
+        int generation = __scanGeneration;
+        return Task.WhenAll(groups.Select(group => ScanRoot(group.Key, group, generation, pass)));
+    }
+
+    private async Task ScanRoot(string root, IEnumerable<ScanTarget> targets, int generation, ScanPass pass)
+    {
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            // SMBへの同時照会を増やさず、全対象を順に調べる。Windows UIは待たせない。
-            var results = await Task.Run(() => targets.Select(x => new ScanResult(
-                x.Id, x.Revision, x.IsFolder ? null : FileProbe.Read(x.Path),
-                x.IsFolder ? FolderProbe.Read(x.Path, x.Recursive) : null, DateTimeOffset.Now)).ToArray());
-            // 照会中に終了・停止・世代変更が起きた場合は、古い結果を採用しない。
-            if (__exiting || IsDisposed || __state.Paused || generation != __scanGeneration)
+            foreach (var target in targets)
             {
-                return;
-            }
+                if (!CanApplyScan(generation))
+                {
+                    break;
+                }
 
-            inboxChanged = ApplyResults(results);
+                var result = await Task.Run(() => ProbeTarget(target));
+                if (!CanApplyScan(generation))
+                {
+                    break;
+                }
+
+                // 待ち時間の長い別対象を待たず、取得できた結果を UI スレッドで反映する。
+                ApplyResult(result, pass, seenPaths);
+            }
         }
         catch (Exception ex)
         {
-            // 画面がまだ有効な場合だけ巡回エラーをステータス表示用に残す。
-            if (!__exiting && !IsDisposed)
+            if (CanApplyScan(generation))
             {
                 __pollError = "照会に失敗：" + ex.Message;
             }
         }
         finally
         {
-            __isScanning = false;
-            // 終了中でなければ表示を更新し、次の巡回を予約する。
+            __activeScanRoots.Remove(root);
             if (!__exiting && !IsDisposed)
             {
-                RefreshRows(inboxChanged);
-                StartTimer(immediate: generation != __scanGeneration);
+                UpdateStatus();
             }
         }
     }
 
-    /// @brief 一回の巡回で監視対象を照会して結果をまとめる。
-    private sealed record ScanResult(Guid Id, int Revision, ProbeResult? File, FolderResult? Folder, DateTimeOffset At);
+    private bool CanApplyScan(int generation) =>
+        !__exiting && !IsDisposed && !__state.Paused && generation == __scanGeneration;
 
-    /// @brief 有効な観測結果だけを未読状態・履歴・通知へ反映する。
-    private bool ApplyResults(IEnumerable<ScanResult> results)
+    private ScanResult ProbeTarget(ScanTarget target)
     {
-        // 差分がない巡回では未読一覧を走査しない。最初の差分を登録する前に一度だけ取得する。
-        var pending = new Lazy<HashSet<string>>(PendingPaths);
-        var detected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var alerts = new List<string>();
-        bool baselineChanged = false;
-        var byId = __state.Items.ToDictionary(x => x.Id);
-        foreach (var result in results)
+        FolderResult? folder = null;
+        ProbeResult? file = null;
+        if (target.IsFolder)
         {
-            // 登録解除済み、または監視範囲変更前の結果は対象に適用しない。
-            if (!byId.TryGetValue(result.Id, out var item) || item.Revision != result.Revision)
-            {
-                continue;
-            }
-
-            bool hadBaseline = item.Baseline is not null;
-            DateTimeOffset? lastWrite = item.LatestFileWriteAt;
-            Action<string, string> record = (path, kind) => RecordDetectedChange(path, kind, result.At, pending.Value, detected, alerts);
-            // フォルダの照会結果は子ファイルの一覧として比較する。
-            if (result.Folder is not null)
-            {
-                item.ObserveFolder(result.Folder, result.At, record);
-            }
-            // 個別ファイルの照会結果はそのファイルの指紋と比較する。
-            else
-            {
-                item.Observe(result.File!, result.At, record);
-            }
-
-            baselineChanged |= (!hadBaseline && item.Baseline is not null) || item.LatestFileWriteAt != lastWrite;
+            folder = FolderProbe.Read(target.Path, target.Recursive, __store.IsInternalFile);
         }
-        __lastPoll = DateTimeOffset.Now;
-        // 照会時刻と一時的な通信エラーは画面だけ更新する。
-        // 比較基準・検知内容に変化があった場合や、未保存の変更がある場合だけ保存する。
-        if (baselineChanged || detected.Count > 0 || __hasUnsavedChanges)
+        else if (__store.IsInternalFile(target.Path))
+        {
+            file = new(ProbeState.Unavailable, Error: "アプリ自身のキャッシュは監視できません");
+        }
+        else
+        {
+            file = (__testFileProbe ?? FileProbe.Read)(target.Path);
+        }
+        return new(target.Id, target.Revision, file, folder, DateTimeOffset.Now);
+    }
+
+    private sealed record ScanTarget(Guid Id, string Path, bool IsFolder, bool Recursive, int Revision);
+    private sealed record ScanResult(Guid Id, int Revision, ProbeResult? File, FolderResult? Folder, DateTimeOffset At);
+    private sealed class ScanPass
+    {
+        public int AlertCount { get; set; }
+    }
+
+    private void ApplyResult(ScanResult result, ScanPass pass, HashSet<string> seenPaths)
+    {
+        // 登録解除済み、または監視範囲変更前の結果を反映しない。
+        var item = __state.Items.Find(x => x.Id == result.Id);
+        if (item is null || item.Revision != result.Revision)
+        {
+            return;
+        }
+
+        var pending = new Lazy<HashSet<string>>(PendingPaths);
+        var alerts = new List<string>();
+        bool changed = false;
+        var baselineBefore = item.Baseline;
+        var lastWriteBefore = item.LatestFileWriteAt;
+        void Record(string path, string kind)
+        {
+            changed = true;
+            RecordDetectedChange(path, kind, result.At, pending.Value, seenPaths, alerts);
+        }
+
+        if (result.Folder is { } folder)
+        {
+            item.ObserveFolder(folder, result.At, Record);
+        }
+        else
+        {
+            item.Observe(result.File!, result.At, Record);
+        }
+
+        __lastPoll = result.At;
+        if (changed || item.Baseline != baselineBefore || item.LatestFileWriteAt != lastWriteBefore || __hasUnsavedChanges)
         {
             Save();
         }
-
-        // 新しい変更を記録した場合だけ履歴画面を更新する。
-        if (detected.Count > 0)
+        if (changed)
         {
             RefreshHistory();
         }
 
+        pass.AlertCount += alerts.Count;
+        if (ReferenceEquals(pass, __latestScanPass))
+        {
+            __lastAlertCount = pass.AlertCount;
+        }
         NotifyNewChanges(alerts);
-        return detected.Count > 0;
+        RefreshRows(changed);
     }
 
     /// @brief 同じ巡回で重複したパスを除き、履歴と初回の未読通知に反映する。
@@ -152,7 +198,6 @@ internal sealed partial class MainWindow
     /// @brief 初めて未読になったパスだけを通知し、試験中は OS 通知を抑止する。
     private void NotifyNewChanges(List<string> alerts)
     {
-        __lastAlertCount = alerts.Count;
         // 新しい通知がない場合と無人テストでは、バルーンや通知音を出さない。
         if (alerts.Count == 0 || __testMode)
         {

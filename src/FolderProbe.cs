@@ -33,11 +33,11 @@ internal static class FolderProbe
     private const int EntryLimit = 50_000; //!< 一回の列挙で保持できる項目数の上限。
 
     /// @brief 入力から観測値または保存状態を読み込む。
-    public static FolderResult Read(string root, bool recursive)
+    public static FolderResult Read(string root, bool recursive, Func<string, bool>? exclude = null)
     {
         try
         {
-            return new(TakeInventory(root, recursive));
+            return new(TakeInventory(root, recursive, exclude));
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {
@@ -47,7 +47,7 @@ internal static class FolderProbe
     }
 
     /// @brief 監視範囲を走査し比較用辞書を構築する。
-    private static Dictionary<string, Fingerprint> TakeInventory(string root, bool recursive)
+    private static Dictionary<string, Fingerprint> TakeInventory(string root, bool recursive, Func<string, bool>? exclude)
     {
         var files = new Dictionary<string, Fingerprint>(StringComparer.OrdinalIgnoreCase);
         // 深いフォルダでも呼び出しスタックを消費せず、親の検索を閉じてから子を開く。
@@ -64,7 +64,10 @@ internal static class FolderProbe
                 // ファイルは相対パスと指紋を今回の比較対象に加える。
                 if (!entry.IsFolder)
                 {
-                    files[path] = entry.Fingerprint;
+                    if (exclude?.Invoke(Path.Combine(root, path)) != true)
+                    {
+                        files[path] = entry.Fingerprint;
+                    }
                 }
                 // フォルダは再帰監視のときだけ、次の探索対象に加える。
                 else if (recursive)
