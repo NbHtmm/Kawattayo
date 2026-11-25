@@ -233,6 +233,7 @@ internal sealed partial class MainWindow
         await File.AppendAllTextAsync(stable, "another file");
         await Scan();
         SelfTest.Check(__lastAlertCount == 1, "different nested file notifies independently");
+        VerifyFolderAcknowledgementDuringUpdate(folder);
         await VerifyParentFolderMenu(folder, setOpen);
         await File.AppendAllTextAsync(changed, "unread after opening parent");
         await Scan();
@@ -252,6 +253,25 @@ internal sealed partial class MainWindow
         await Scan();
         await OpenInboxItem(__inbox.Nodes[0]);
         SelfTest.Check(__inbox.Nodes.Count == 0, "opening root acknowledges its pending changes when enabled");
+    }
+
+    private void VerifyFolderAcknowledgementDuringUpdate(string folder)
+    {
+        // 実際のルート行で、起動待ちに別のファイルが追加／更新されるタイミングを再現する。
+        var row = (InboxRow)__inbox.Nodes[0].Tag!;
+        var test = new WatchItem { Path = folder, IsFolder = true };
+        var now = DateTimeOffset.Now;
+        test.ObserveFolder(new(new() { ["old.txt"] = new(1, 1, 1), ["again.txt"] = new(1, 1, 1) }), now);
+        test.ObserveFolder(new(new() { ["old.txt"] = new(1, 1, 2), ["again.txt"] = new(1, 1, 2) }), now.AddSeconds(1));
+        var acknowledge = GetAcknowledgement(test, row);
+        test.ObserveFolder(new(new()
+        {
+            ["old.txt"] = new(1, 1, 2), ["again.txt"] = new(1, 1, 3), ["new.txt"] = new(1, 1, 1)
+        }), now.AddSeconds(2));
+        acknowledge();
+        SelfTest.Check(test.Unread == 3 && !test.PendingFiles.ContainsKey("old.txt") &&
+            test.PendingFiles.ContainsKey("again.txt") && test.PendingFiles.ContainsKey("new.txt"),
+            "opening a folder clears unchanged old unread but preserves new updates");
     }
 
     private async Task VerifyParentFolderMenu(string folder, Action<bool> setOpen)

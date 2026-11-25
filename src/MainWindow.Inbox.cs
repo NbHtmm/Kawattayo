@@ -511,26 +511,38 @@ internal sealed partial class MainWindow
             return () => item.AcknowledgeFile(file);
         }
 
-        // 中間フォルダの行は、その配下で操作開始時点に未読だった変更に限定する。
-        if (row.IsBranch)
+        var seen = item.LastChanged;
+        var unread = item.Unread;
+        if (!item.IsFolder)
         {
-            var prefix = row.Relative + Path.DirectorySeparatorChar;
-            var current = item.PendingFiles.Values.Where(x => x.Relative.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
             return () =>
             {
-                foreach (var change in current)
+                if (item.LastChanged == seen && item.Unread == unread)
                 {
-                    item.AcknowledgeFile(change);
+                    item.Acknowledge();
                 }
             };
         }
-        var seen = item.LastChanged;
+
+        // 開く前の未読だけを保持する。別の子に新着があっても、既存の変更は確認できる。
+        var prefix = row.IsBranch ? row.Relative + Path.DirectorySeparatorChar : null;
+        var snapshot = item.PendingFiles.Values
+            .Where(change => prefix is null || change.Relative.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
         return () =>
         {
-            // ルート行を開く間に新しい変更がなかった場合だけ、対象全体を既読にする。
-            if (item.LastChanged == seen)
+            // 旧形式で内訳がない未読は、ルートの未読が変化していないときだけ一括で消す。
+            if (prefix is null && item.SavedUnreadWithoutDetails > 0 &&
+                item.LastChanged == seen && item.Unread == unread && item.PendingFiles.Count == snapshot.Length &&
+                snapshot.All(change => item.PendingFiles.TryGetValue(change.Relative, out var latest) && latest == change))
             {
                 item.Acknowledge();
+                return;
+            }
+
+            foreach (var change in snapshot)
+            {
+                item.AcknowledgeFile(change);
             }
         };
     }

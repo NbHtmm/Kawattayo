@@ -75,6 +75,7 @@ internal static class SelfTest
         var restored = store.Load();
         Check(restored.Warning is not null && restored.State.Items.Single().Unread == 1, "recover previous valid backup");
         Check(Directory.GetFiles(root, "cache.json.broken-*").Length == 1, "preserve corrupt source");
+        Check(File.Exists(file) && File.Exists(file + ".bak") && store.Load() is { Warning: null }, "restore primary immediately and keep valid backup");
         var invalidStore = new StateStore(Path.Combine(root, "invalid-child.json"));
         item.PendingFiles.Add(@"..\outside", new FileChange(@"..\outside", "更新", at));
         invalidStore.Save(reopened);

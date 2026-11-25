@@ -13,6 +13,10 @@ start /wait "" "bin\かわったよ.exe" --self-test build\self.txt
 start /wait "" "bin\かわったよ.exe" --ui-test build\preview-ui.txt
 ```
 
+## GitHub Releases 用 ZIP
+
+Windows の PowerShell で `.\tool\package.ps1` を実行すると、ビルドから `build\Kawattayo_win_x64.zip` の作成まで行います。ZIP には実行ファイル、使い方、プロジェクトの MIT ライセンス、同梱した .NET ランタイムパックのライセンスと通知（パック提供分）だけが入ります。設定・履歴・レポートは含めません。このコマンドは GitHub にアップロードしません。
+
 ## プライバシーとライセンス
 
 設定・履歴・対象パスは exe の横の `cache.json` に保存します。キャッシュ、バックアップ、レポート、スクリーンショットには実際のパスが含まれることがあります。公開しないでください。コミットやリリースには秘密情報がないか確認してください。

@@ -121,7 +121,17 @@ internal sealed class StateStore(string file)
             ArchivePrimary();
         }
 
-        return (RemoveInternalObservations(backup), "メインの設定を読み込めなかったため、バックアップから復元しました。");
+        RemoveInternalObservations(backup);
+        try
+        {
+            // 退避後の本体を直ちに作り直す。次の巡回や既読操作を待たず、バックアップは保持する。
+            Save(backup);
+            return (backup, "メインの設定を読み込めなかったため、バックアップから復元しました。");
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return (backup, "バックアップを読み込みましたが、設定ファイルを復元できませんでした：" + error.Message);
+        }
     }
 
     /// @brief 破損した本体を別名で保持する。
