@@ -42,7 +42,9 @@ internal sealed partial class MainWindow
             BackColor = WatchTheme.Window,
             ForeColor = WatchTheme.Ink,
             Size = new Size(1130, 640),
-            MinimumSize = new Size(780, 500),
+            AutoScaleDimensions = new SizeF(96, 96),
+            AutoScaleMode = AutoScaleMode.Dpi,
+            MinimumSize = new Size(520, 360),
             ShowInTaskbar = false,
             StartPosition = FormStartPosition.CenterParent
         };
@@ -72,7 +74,7 @@ internal sealed partial class MainWindow
     /// @brief 設定画面の各領域と操作を構築する。
     private Control BuildOptionsCard()
     {
-        var card = WatchTheme.Layout(rows: 3);
+        var card = WatchTheme.Layout(rows: 4);
         card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         card.AutoSize = true;
         card.Dock = DockStyle.Top;
@@ -129,8 +131,11 @@ internal sealed partial class MainWindow
             Save();
         };
         __readOnOpen.Margin = new Padding(0, 8, 0, 2);
-        card.Controls.Add(new SettingsGroup("通知と既読", WatchTheme.Stack(__keepInTrayOption, __description, __readOnOpen)), 0, 1);
-        card.Controls.Add(new SettingsGroup("表示", WatchTheme.Stack(__darkModeOption)), 0, 2);
+        __renotifyUnread.Checked = __state.RenotifyUnread;
+        __renotifyUnread.CheckedChanged += (_, _) => { __state.RenotifyUnread = __renotifyUnread.Checked; Save(); };
+        card.Controls.Add(new SettingsGroup("通知と既読", WatchTheme.Stack(__keepInTrayOption, __description, __readOnOpen, __renotifyUnread)), 0, 1);
+        card.Controls.Add(new SettingsGroup("表示", WatchTheme.Stack(__darkModeOption, BuildDisplaySizeControl())), 0, 2);
+        card.Controls.Add(new SettingsGroup("除外するファイル", BuildExclusionOptions()), 0, 3);
         return card;
     }
 
@@ -186,6 +191,15 @@ internal sealed partial class MainWindow
             }
         };
         __targetList.MultiSelect = false;
+        BindTargetSorting();
+        __targetList.DoubleClick += async (_, _) =>
+        {
+            if (__targetList.SelectedItems.Count == 1 && __targetList.SelectedItems[0].Tag is Guid id &&
+                __state.Items.Find(item => item.Id == id) is { } item)
+            {
+                await OpenRegisteredTarget(item, parent: false);
+            }
+        };
         __targetList.MouseClick += (_, e) =>
         {
             var row = __targetList.HitTest(e.Location).Item;
@@ -202,6 +216,13 @@ internal sealed partial class MainWindow
             // 登録対象にフォーカスがなければキーボードからの行操作を行わない。
             if (__targetList.FocusedItem?.Tag is not Guid id)
             {
+                return;
+            }
+
+            if (e.KeyCode == Keys.F2 && __state.Items.Find(item => item.Id == id) is { } target)
+            {
+                e.SuppressKeyPress = true;
+                RenameTarget(target);
                 return;
             }
 
@@ -224,7 +245,7 @@ internal sealed partial class MainWindow
         }
 
         int usedWidth = __targetList.Columns.Cast<ColumnHeader>().Take(pathColumn.Index).Sum(column => column.Width);
-        int width = Math.Max(160, __targetList.ClientSize.Width - usedWidth);
+        int width = Math.Max(ScaleForDisplay(__targetList, 160), __targetList.ClientSize.Width - usedWidth);
         // 必要な幅が変わったときだけ列に反映し、再計算の連鎖を防ぐ。
         if (pathColumn.Width != width)
         {
@@ -235,9 +256,12 @@ internal sealed partial class MainWindow
     /// @brief マウスとキーボードで共通の監視対象メニューを表示する。
     private void ShowTargetMenu(Guid targetId, Point location)
     {
-        var item = __state.Items.Single(target => target.Id == targetId);
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("登録解除", null, (_, _) => Unregister(item));
+        if (__state.Items.Find(target => target.Id == targetId) is not { } item)
+        {
+            return;
+        }
+
+        var menu = BuildTargetMenu(item);
         menu.Closed += (_, _) => BeginInvoke(new Action(menu.Dispose));
         menu.Show(__targetList, location);
     }
@@ -410,16 +434,21 @@ internal sealed partial class MainWindow
             {
                 __targetList.Items.Remove(unused);
             }
+            SortTargetRows();
         }
         finally { __targetList.EndUpdate(); }
         __targetSelection.Sync();
     }
 
     /// @brief 選択行を再利用しながら監視結果を設定一覧へ反映する。
-    private static void UpdateManagementRow(ListViewItem row, WatchItem item)
+    private void UpdateManagementRow(ListViewItem row, WatchItem item)
     {
         var health = item.Error is not null ? "⚠ 監視失敗" : item.LastChecked is null ? "未照会" : item.Baseline == ProbeState.Missing ? "対象なし" : "正常";
-        string[] values = [DisplayName(item.Path), health, Time(item.LatestFileWriteAt, true), Time(item.LastChecked, true), item.IsFolder ? "フォルダ" : "ファイル", item.Path];
+        if (!item.IsFolder && FileExclusions.Matches(item.Path, __state.ExcludedFilePatterns))
+        {
+            health = "除外中";
+        }
+        string[] values = [TargetDisplayName(item), health, Time(item.LatestFileWriteAt, true), Time(item.LastChecked, true), item.IsFolder ? "フォルダ" : "ファイル", item.Path];
         for (int i = 0; i < values.Length; i++)
         {
             // セルの表示値が変わった場合だけ一覧を書き換える。

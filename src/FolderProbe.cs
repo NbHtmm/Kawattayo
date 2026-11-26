@@ -24,7 +24,10 @@ internal sealed record FileChange(string Relative, string Kind, DateTimeOffset D
 }
 
 /// @brief フォルダ内の比較用一覧または取得失敗理由。
-internal sealed record FolderResult(Dictionary<string, Fingerprint>? Files, string? Error = null);
+internal sealed record FolderResult(Dictionary<string, Fingerprint>? Files, string? Error = null)
+{
+    public string[] Exclusions { get; init; } = []; //!< この一覧を取得した時点のファイル名除外ルール。
+}
 
 /// @brief フォルダのスナップショット取得と差分検出。
 internal static class FolderProbe
@@ -80,7 +83,8 @@ internal static class FolderProbe
     }
 
     /// @brief 前回と今回の一覧から追加・変更・消失を求める。
-    public static List<FileChange> Compare(Dictionary<string, Fingerprint> before, Dictionary<string, Fingerprint> after, DateTimeOffset now)
+    public static List<FileChange> Compare(Dictionary<string, Fingerprint> before, Dictionary<string, Fingerprint> after,
+        DateTimeOffset now, string[]? previouslyExcluded = null, string[]? nowExcluded = null)
     {
         // 両方ともパスの大文字小文字を区別しない辞書。前回一覧のコピーは不要。
         // 同じスナップショットを比較する場合は差分がない。
@@ -95,7 +99,11 @@ internal static class FolderProbe
             // 前回の一覧になかったパスは、新規追加として記録する。
             if (!before.TryGetValue(path, out var prior))
             {
-                changes.Add(new(path, "追加", now));
+                // 除外解除で初めて見えるファイルは、追加ではなく新しい基準にする。
+                if (!FileExclusions.Matches(path, previouslyExcluded))
+                {
+                    changes.Add(new(path, "追加", now));
+                }
             }
             // 既存パスの指紋が変わった場合は、追加ではなく更新として記録する。
             else if (prior != current)
@@ -107,7 +115,8 @@ internal static class FolderProbe
         foreach (var path in before.Keys)
         {
             // 前回だけ存在したパスは消失として記録する。
-            if (!after.ContainsKey(path))
+            // 新たに除外した名前は、実際に削除されたと区別する。
+            if (!after.ContainsKey(path) && !FileExclusions.Matches(path, nowExcluded))
             {
                 changes.Add(new(path, "消失", now));
             }

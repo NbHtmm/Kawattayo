@@ -46,15 +46,19 @@ internal sealed partial class MainWindow : Form
         __launchFolder = launchFolder ?? WindowsShell.OpenFolder;
         (__state, __startupWarning) = store.Load();
         WatchTheme.DarkMode = __state.DarkMode;
-        Text = AppDefaults.AppName;
+        Text = AppDefaults.WindowTitle;
         Icon = __tray.Icon = __baseIcon;
-        Font = new Font("Yu Gothic UI", 10F);
+        AutoScaleDimensions = new SizeF(96, 96);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Font = GetDisplayFont(DefaultDisplayPoints, FontStyle.Regular);
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(780, 480);
+        MinimumSize = new Size(520, 360);
         Size = new Size(1080, 650);
         __pollIntervalInput.Value = __state.PollSeconds;
         BuildInbox();
         BuildManagement();
+        ApplyDisplayTypography();
+        DpiChanged += (_, _) => BeginInvoke(ResizeInboxMetrics);
         ConfigureTray();
         ApplyTheme();
         RefreshRows();
@@ -327,6 +331,7 @@ internal sealed partial class MainWindow : Form
         {
             __unreadIcon.Dispose();
             __baseIcon.Dispose();
+            DisposeDisplayFonts();
         }
     }
 }

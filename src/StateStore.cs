@@ -170,8 +170,10 @@ internal sealed class StateStore(string file)
         foreach (var item in data.Items)
         {
             NormalizeDictionaries(item);
+            item.InventoryExclusions = FileExclusions.Normalize(item.InventoryExclusions);
         }
 
+        data.ExcludedFilePatterns = FileExclusions.Normalize(data.ExcludedFilePatterns);
         data.PollSeconds = Math.Clamp(data.PollSeconds, AppDefaults.MinimumPollSeconds, AppDefaults.MaximumPollSeconds);
         return data;
     }

@@ -34,8 +34,10 @@ internal sealed partial class MainWindow
         }
 
         // 同じ UNC 共有（ローカル・割当ドライブはドライブ単位）への照会は直列に保つ。
+        var exclusions = __state.ExcludedFilePatterns; // 巡回開始時のルールをワーカーに渡す。
         var groups = __state.Items
-            .Select(x => new ScanTarget(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision))
+            .Where(x => x.IsFolder || !FileExclusions.Matches(x.Path, exclusions))
+            .Select(x => new ScanTarget(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision, exclusions))
             .GroupBy(x => Path.TrimEndingDirectorySeparator(Path.GetPathRoot(x.Path)!), StringComparer.OrdinalIgnoreCase)
             .Where(x => __activeScanRoots.Add(x.Key))
             .ToArray();
@@ -103,7 +105,9 @@ internal sealed partial class MainWindow
         ProbeResult? file = null;
         if (target.IsFolder)
         {
-            folder = FolderProbe.Read(target.Path, target.Recursive, __store.IsInternalFile);
+            folder = FolderProbe.Read(target.Path, target.Recursive,
+                path => FileExclusions.Matches(path, target.Exclusions) || __store.IsInternalFile(path))
+                with { Exclusions = target.Exclusions };
         }
         else if (__store.IsInternalFile(target.Path))
         {
@@ -116,7 +120,7 @@ internal sealed partial class MainWindow
         return new(target.Id, target.Revision, file, folder, DateTimeOffset.Now);
     }
 
-    private sealed record ScanTarget(Guid Id, string Path, bool IsFolder, bool Recursive, int Revision);
+    private sealed record ScanTarget(Guid Id, string Path, bool IsFolder, bool Recursive, int Revision, string[] Exclusions);
     private sealed record ScanResult(Guid Id, int Revision, ProbeResult? File, FolderResult? Folder, DateTimeOffset At);
     private sealed class ScanPass
     {
@@ -136,11 +140,13 @@ internal sealed partial class MainWindow
         var alerts = new List<string>();
         bool changed = false;
         var baselineBefore = item.Baseline;
+        var inventoryExclusionsBefore = item.InventoryExclusions;
         var lastWriteBefore = item.LatestFileWriteAt;
         void Record(string path, string kind)
         {
             changed = true;
-            RecordDetectedChange(path, kind, result.At, pending.Value, seenPaths, alerts);
+            // 再通知が有効なら既存の未読集合を作らず、同一巡回内の重複だけを抑える。
+            RecordDetectedChange(path, kind, result.At, __state.RenotifyUnread ? null : pending.Value, seenPaths, alerts);
         }
 
         if (result.Folder is { } folder)
@@ -153,7 +159,9 @@ internal sealed partial class MainWindow
         }
 
         __lastPoll = result.At;
-        if (changed || item.Baseline != baselineBefore || item.LatestFileWriteAt != lastWriteBefore || __hasUnsavedChanges)
+        bool exclusionScopeChanged = !FileExclusions.Same(inventoryExclusionsBefore, item.InventoryExclusions ?? []);
+        if (changed || exclusionScopeChanged || item.Baseline != baselineBefore ||
+            item.LatestFileWriteAt != lastWriteBefore || __hasUnsavedChanges)
         {
             Save();
         }
@@ -173,7 +181,7 @@ internal sealed partial class MainWindow
 
     /// @brief 同じ巡回で重複したパスを除き、履歴と初回の未読通知に反映する。
     private void RecordDetectedChange(string path, string kind, DateTimeOffset detectedAt,
-        HashSet<string> previouslyUnread, HashSet<string> detected, List<string> alerts)
+        HashSet<string>? previouslyUnread, HashSet<string> detected, List<string> alerts)
     {
         // 同一巡回で重複して検知したパスを履歴や通知に二重計上しない。
         if (!detected.Add(path))
@@ -181,8 +189,8 @@ internal sealed partial class MainWindow
             return;
         }
 
-        // 巡回前から未読だったパスは履歴に残すが、再通知はしない。
-        if (!previouslyUnread.Contains(path))
+        // 再通知を抑止する設定でも、未読・履歴の記録自体は省略しない。
+        if (previouslyUnread?.Contains(path) != true)
         {
             alerts.Add($"{DisplayName(path)}：{kind}");
         }
@@ -195,7 +203,7 @@ internal sealed partial class MainWindow
         }
     }
 
-    /// @brief 初めて未読になったパスだけを通知し、試験中は OS 通知を抑止する。
+    /// @brief 今回通知対象になった変更を知らせる。試験中は OS 通知を抑止する。
     private void NotifyNewChanges(List<string> alerts)
     {
         // 新しい通知がない場合と無人テストでは、バルーンや通知音を出さない。
@@ -207,7 +215,7 @@ internal sealed partial class MainWindow
         // 常駐時は通知領域のバルーンに変更内容を表示する。
         if (__state.KeepInTray)
         {
-            __tray.BalloonTipTitle = $"{AppDefaults.AppName} ｜ 新しい未読 {alerts.Count} ファイル";
+            __tray.BalloonTipTitle = $"{AppDefaults.AppName} ｜ 変更を検知した {alerts.Count} ファイル";
             __tray.BalloonTipText = string.Join(Environment.NewLine, alerts.Take(3));
             __tray.ShowBalloonTip(4500);
         }

@@ -23,6 +23,7 @@ internal static class SelfTest
                 TestCache(root.FullName, lines);
                 TestPortableStore(root.FullName, lines);
                 TestCacheExclusion(root.FullName, lines);
+                TestUserExclusions(root.FullName, lines);
                 TestDisk(root.FullName, lines);
                 TestFolders(root.FullName, lines, "local");
                 TestSmb(root.FullName, lines);
@@ -110,6 +111,54 @@ internal static class SelfTest
         File.Delete(dest);
         Check(StateStore.BesideExecutable(exeDir).Load().State.PollSeconds == 17 && File.Exists(dest) && File.Exists(dest + ".bak"), "missing portable primary recreated from local backup");
         lines.Add("PASS: isolated portable settings and history, same-directory backup recovery");
+    }
+
+    private static void TestUserExclusions(string root, List<string> lines)
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(root, "name-exclusions")).FullName;
+        var temp = Path.Combine(folder, "~$Draft.DOCX");
+        var ordinary = Path.Combine(folder, "office.docx");
+        var now = DateTimeOffset.Now;
+
+        var patterns = FileExclusions.Parse("~$*.docx\r\nTHUMBNAILS.DB\n~$*.DOCX\n");
+        Check(patterns.Length == 2 && FileExclusions.Matches(temp, patterns) &&
+            FileExclusions.Matches("thumbnails.db", patterns) && !FileExclusions.Matches(ordinary, patterns),
+            "case-insensitive literal and wildcard filename exclusion");
+        bool rejected = false;
+        try { FileExclusions.Parse(@"folder\*.txt"); }
+        catch (ArgumentException) { rejected = true; }
+        Check(rejected, "exclude by filename, not by path");
+
+        File.WriteAllText(temp, "office lock");
+        File.WriteAllText(ordinary, "normal file");
+        var item = new WatchItem { Path = folder, IsFolder = true };
+        Check(item.ObserveFolder(FolderProbe.Read(folder, true), now) is null &&
+            item.Inventory?.Count == 2, "baseline includes the original files");
+        File.AppendAllText(ordinary, " with a simultaneous real edit");
+        var filtered = FolderProbe.Read(folder, true, path => FileExclusions.Matches(path, patterns))
+            with { Exclusions = patterns };
+        var seen = new List<string>();
+        void Record(string path, string kind) => seen.Add(path + ":" + kind);
+        item.ObserveFolder(filtered, now, Record);
+        Check(item.Inventory?.Count == 1 && seen.SequenceEqual([ordinary + ":更新"]),
+            "enabling an exclusion emits no synthetic deletion but preserves unrelated real changes");
+
+        var state = new AppState { ExcludedFilePatterns = patterns, Items = [item] };
+        var store = new StateStore(Path.Combine(root, "user-exclusions.json"));
+        store.Save(state);
+        var restored = store.Load().State;
+        item = restored.Items.Single();
+        Check(FileExclusions.Same(restored.ExcludedFilePatterns, patterns) &&
+            FileExclusions.Same(item.InventoryExclusions, patterns), "rules and snapshot scope survive restart");
+
+        seen.Clear();
+        Check(item.ObserveFolder(FolderProbe.Read(folder, true), now, Record) is null &&
+            item.Inventory?.Count == 2 && seen.Count == 0,
+            "disabling an exclusion rebaselines the previously invisible file silently");
+        File.AppendAllText(temp, " with a real edit after reinclusion");
+        item.ObserveFolder(FolderProbe.Read(folder, true), now, Record);
+        Check(seen.SequenceEqual([temp + ":更新"]), "reincluded files resume ordinary monitoring");
+        lines.Add("PASS: filename exclusions, selective rebaselining, persistent snapshot scope");
     }
 
     private static void TestCacheExclusion(string root, List<string> lines)

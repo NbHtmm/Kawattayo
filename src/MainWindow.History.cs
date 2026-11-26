@@ -20,6 +20,14 @@ internal sealed partial class MainWindow
         WatchTheme.StyleListHeader(__historyRows);
         __historyRows.Columns.Add("変更", 70);
         __historyRows.Columns.Add("ファイルパス", 570);
+        __historyRows.HeaderStyle = ColumnHeaderStyle.Clickable;
+        UpdateListHeadings(__historyRows, s_historyHeadings, __historySort);
+        __historyRows.ColumnClick += (_, e) =>
+        {
+            __historySort.Toggle(e.Column);
+            UpdateListHeadings(__historyRows, s_historyHeadings, __historySort);
+            RefreshHistory();
+        };
         __historyRows.ClientSizeChanged += (_, _) => FitHistoryColumns();
         __historyRows.ColumnWidthChanged += (_, e) =>
         {
@@ -29,13 +37,14 @@ internal sealed partial class MainWindow
                 FitHistoryColumns();
             }
         };
-        __historyWindow = new Form { Text = $"{AppDefaults.AppName} | 変更履歴", Font = Font, Size = new Size(870, 440), StartPosition = FormStartPosition.CenterParent, ShowInTaskbar = false };
+        __historyWindow = new Form { Text = $"{AppDefaults.AppName} | 変更履歴", Font = Font, AutoScaleMode = AutoScaleMode.Dpi, MinimumSize = new Size(380, 260), Size = new Size(870, 440), StartPosition = FormStartPosition.CenterParent, ShowInTaskbar = false };
         __historyWindow.Controls.Add(__historyRows);
         __historyWindow.Controls.Add(new SelectionFooter(__historyRows, row => row.Tag is HistoryEntry ? RowText(row) : ""));
         __historyWindow.Icon = __baseIcon;
         WatchTheme.Apply(__historyWindow);
         __historyWindow.FormClosed += (_, _) => { __historyWindow = null; __historyRows = null; };
         RefreshHistory();
+        ApplyDisplayTypography();
         __historyWindow.Show(this);
         FitHistoryColumns();
     }
@@ -57,7 +66,7 @@ internal sealed partial class MainWindow
         }
     }
 
-    /// @brief 選択を維持して履歴を新しい順に再表示する。
+    /// @brief 選択を維持して指定列の順に再表示する。
     private void RefreshHistory()
     {
         // 履歴画面が未作成または閉じていれば、表示の更新は不要。
@@ -71,7 +80,7 @@ internal sealed partial class MainWindow
         try
         {
             list.Items.Clear();
-            foreach (var entry in __state.History.Reverse())
+            foreach (var entry in OrderedHistory())
             {
                 list.Items.Add(new ListViewItem(new[] { entry.At.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss"), entry.Kind, entry.Path }) { Tag = entry, ToolTipText = entry.Path }).Selected = selected.Contains(entry);
             }

@@ -23,6 +23,8 @@ internal sealed partial class MainWindow
         await VerifyNestedAcknowledgement(changed, stable, folder, setOpen);
         await VerifyOutageRecovery(folder, previewDirectory);
         await VerifyIndependentShares();
+        await VerifyTargetOptions(path);
+        await VerifyExclusionSettings(Path.GetDirectoryName(path)!);
         VerifyTrayLifetime();
     }
 
@@ -41,12 +43,15 @@ internal sealed partial class MainWindow
         var managementSize = __management.Size;
         __management.Size = __management.MinimumSize;
         __settingsTabs.SelectedIndex = 1;
-        SelfTest.Check(__darkModeOption.Visible && !__targetList.Visible && __management.ClientRectangle.Contains(
-            __management.RectangleToClient(__darkModeOption.RectangleToScreen(__darkModeOption.ClientRectangle))), "display option fits on compact settings page");
+        var options = (Panel)__settingsTabs.TabPages[1].Controls[0];
+        options.ScrollControlIntoView(__darkModeOption);
+        SelfTest.Check(options.AutoScroll && __darkModeOption.Visible && !__targetList.Visible && options.ClientRectangle.Contains(
+            options.RectangleToClient(__darkModeOption.RectangleToScreen(__darkModeOption.ClientRectangle))), "display option is reachable in compact settings");
         __settingsTabs.SelectedIndex = 0;
         SelfTest.Check(__targetList.Visible && __targetList.Items.Count == 0 && __addTarget.Visible && !__darkModeOption.Visible && __targetList.ClientSize.Height > 50,
             "compact targets page shows registration and list together");
         __management.Size = managementSize;
+        VerifyDisplayTypography();
         SelfTest.Check(!__trayMenu.Items.Cast<ToolStripItem>().Any(x => x.Text == "監視対象と設定"), "tray omits settings shortcut");
     }
 
@@ -95,9 +100,10 @@ internal sealed partial class MainWindow
     {
         ShowHistory();
         var lightSurface = __inbox.BackColor;
-        SelfTest.Check(Text == AppDefaults.AppName && __management.Text == $"{AppDefaults.AppName} | 設定" && __historyWindow!.Text == $"{AppDefaults.AppName} | 変更履歴", "titles identify the main and child windows");
+        SelfTest.Check(Text == AppDefaults.WindowTitle && __management.Text == $"{AppDefaults.AppName} | 設定" && __historyWindow!.Text == $"{AppDefaults.AppName} | 変更履歴", "titles identify the main and child windows");
         __historyRows!.Items[0].Selected = true;
         var historySelection = __historyRows.Items[0].Tag;
+        VerifyHistoryColumnSorting();
         RefreshHistory();
         SelfTest.Check(__historyRows.SelectedItems.Count == 1 && Equals(__historyRows.SelectedItems[0].Tag, historySelection), "history keeps selection during refresh");
         // 画像出力が必要な試験だけ、ライト表示の履歴と設定を撮影する。
@@ -176,6 +182,7 @@ internal sealed partial class MainWindow
         __allRecursive.Checked = true;
         await Scan();
         SelfTest.Check(__state.Items[1].Recursive && __store.Load().State.RecursiveFolders == true, "per-folder recursion toggle");
+        VerifyTargetColumnSorting();
     }
 
     /// @brief 入れ子の変更の選択・展開・表示とメニュー操作を確認する。
@@ -233,6 +240,7 @@ internal sealed partial class MainWindow
         await File.AppendAllTextAsync(stable, "another file");
         await Scan();
         SelfTest.Check(__lastAlertCount == 1, "different nested file notifies independently");
+        VerifyInboxColumnSorting();
         VerifyFolderAcknowledgementDuringUpdate(folder);
         await VerifyParentFolderMenu(folder, setOpen);
         await File.AppendAllTextAsync(changed, "unread after opening parent");
@@ -515,7 +523,7 @@ internal sealed partial class MainWindow
         string? openedFor = null;
         __verifyShellMenu = (path, menu) =>
         {
-            SelfTest.Check(menu.Items.Cast<ToolStripItem>().Select(i => i.Text).SequenceEqual(path == changed ? new[] { "開く", "親フォルダを開く", "コピー" } : new[] { "開く", "コピー" }), "context menu is scoped to target kind");
+            SelfTest.Check(menu.Items.Cast<ToolStripItem>().Select(i => i.Text).SequenceEqual(path == changed ? new[] { "開く", "親フォルダを開く", "確認済みにする", "コピー" } : new[] { "開く", "確認済みにする", "コピー" }), "context menu is scoped to target kind");
             openedFor = path;
         };
         try

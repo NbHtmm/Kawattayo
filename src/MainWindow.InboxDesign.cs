@@ -20,15 +20,32 @@ internal sealed partial class MainWindow
     private readonly record struct InboxColumns(int Change, int Updater, int Detected, int Action, int End);
 
     /// @brief 描画とクリック判定で共有する列の境界。
-    private static InboxColumns GetInboxColumns(int width, int dpi)
+    private static InboxColumns GetInboxColumns(int width, int dpi, float textScale = 1)
     {
-        // ヘッダーと行は同じ計算を使い、同じ位置に文字をそろえる。
+        // 狭い画面でも右側の列が名前欄を押し出さないよう、補助列を比例して縮める。
+        // 行・見出し・クリック判定はいずれも同じ境界を参照する。
+        const float secondaryWidth = 111 + 117 + 105 + 84;
         int end = Math.Max(1, width);
-        int changeWidth = 111 * dpi / 96;
-        int updaterWidth = 117 * dpi / 96;
-        int timeWidth = 105 * dpi / 96;
-        int action = end - 84 * dpi / 96;
-        return new(action - timeWidth - updaterWidth - changeWidth, action - timeWidth - updaterWidth, action - timeWidth, action, end);
+        float scale = Math.Min(dpi / 96f * textScale, end * 0.73f / secondaryWidth);
+        int action = end - (int)Math.Round(84 * scale);
+        int detected = end - (int)Math.Round((84 + 105) * scale);
+        int updater = end - (int)Math.Round((84 + 105 + 117) * scale);
+        return new(end - (int)Math.Round(secondaryWidth * scale), updater, detected, action, end);
+    }
+
+    private sealed partial class InboxTree
+    {
+        public InboxColumns LayoutColumns => GetInboxColumns(ClientSize.Width, DeviceDpi,
+            Font.SizeInPoints / DefaultDisplayPoints);
+
+        public event EventHandler? ColumnsChanged;
+
+        protected override void OnClientSizeChanged(EventArgs e)
+        {
+            base.OnClientSizeChanged(e);
+            ColumnsChanged?.Invoke(this, EventArgs.Empty);
+            Invalidate();
+        }
     }
 
     /// @brief 通知行の内容をテーマと列幅に合わせて描画する。
@@ -55,7 +72,7 @@ internal sealed partial class MainWindow
             return;
         }
 
-        var cols = GetInboxColumns(__inbox.ClientSize.Width, __inbox.DeviceDpi);
+        var cols = __inbox.LayoutColumns;
         bool selected = e.Node == __inbox.SelectedNode;
         bool highContrast = SystemInformation.HighContrast;
         Color foreground = selected && highContrast ? SystemColors.HighlightText : WatchTheme.Ink;
@@ -85,8 +102,11 @@ internal sealed partial class MainWindow
         DrawInboxCell(e.Graphics, font, InboxUpdater(row), foreground, cols.Updater, cols.Detected, e.Bounds);
         DrawInboxCell(e.Graphics, font, InboxAge(row, DateTimeOffset.Now), foreground, cols.Detected, cols.Action, e.Bounds);
         var button = Rectangle.FromLTRB(cols.Action + 2, e.Bounds.Top + 1, cols.End - 2, e.Bounds.Bottom - 1);
-        ControlPaint.DrawBorder(e.Graphics, button, WatchTheme.Border, ButtonBorderStyle.Solid);
-        TextRenderer.DrawText(e.Graphics, "確認済み", font, button, foreground, ColumnTextFlags | TextFormatFlags.HorizontalCenter);
+        if (button.Width > 0 && button.Height > 0)
+        {
+            ControlPaint.DrawBorder(e.Graphics, button, WatchTheme.Border, ButtonBorderStyle.Solid);
+            TextRenderer.DrawText(e.Graphics, "確認済み", font, button, foreground, ColumnTextFlags | TextFormatFlags.HorizontalCenter);
+        }
 
         // 選択行にキーボードフォーカスがある場合だけ、フォーカス枠を描く。
         if (selected && __inbox.Focused && cols.End > e.Bounds.Left)
@@ -124,11 +144,15 @@ internal sealed partial class MainWindow
     private sealed class InboxColumnHeader : Control
     {
         private readonly InboxTree __tree; //!< 列幅を共有するツリー。
+        private readonly ViewSort __sort; //!< 選択中の並び順。
+        private readonly Action<int> __toggleSort; //!< クリックされた列の並び替え。
 
         /// @brief 通知行と同じ列境界を使うヘッダー。
-        public InboxColumnHeader(InboxTree tree)
+        public InboxColumnHeader(InboxTree tree, ViewSort sort, Action<int> toggleSort)
         {
             __tree = tree;
+            __sort = sort;
+            __toggleSort = toggleSort;
             Height = 25;
             Margin = Padding.Empty;
             Dock = DockStyle.Top;
@@ -140,12 +164,45 @@ internal sealed partial class MainWindow
             SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer, true);
         }
 
+        /// @brief 描画と同じ列境界でクリックを判定する。操作列はデータを持たないので対象外。
+        private int SortColumnAt(int x)
+        {
+            var cols = __tree.LayoutColumns;
+            if (x < 0 || x >= cols.Action)
+            {
+                return -1;
+            }
+            return x < cols.Change ? 0 : x < cols.Updater ? 1 : x < cols.Detected ? 2 : 3;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            Cursor = SortColumnAt(e.X) >= 0 ? Cursors.Hand : Cursors.Default;
+        }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            HandleSortClick(e);
+        }
+
+        // GUI 試験では、他のウィンドウの重なりに依存せず列のヒット判定とクリック処理を通す。
+        internal void HandleSortClick(MouseEventArgs e)
+        {
+            int column = SortColumnAt(e.X);
+            if (e.Button == MouseButtons.Left && column >= 0)
+            {
+                __toggleSort(column);
+            }
+        }
+
         /// @brief コントロールの状態に合わせて内容を描画する。
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            var cols = GetInboxColumns(__tree.ClientSize.Width, __tree.DeviceDpi);
-            int[] boundaries = [8, cols.Change, cols.Updater, cols.Detected, cols.Action, cols.End];
+            var cols = __tree.LayoutColumns;
+            int[] boundaries = [Math.Min(8, cols.Change), cols.Change, cols.Updater, cols.Detected, cols.Action, cols.End];
             using var separator = new Pen(WatchTheme.Border);
             for (int i = 0; i < s_s_inboxColumnTitles.Length; i++)
             {
@@ -155,7 +212,7 @@ internal sealed partial class MainWindow
                     e.Graphics.DrawLine(separator, boundaries[i], 0, boundaries[i], Height);
                 }
 
-                DrawInboxCell(e.Graphics, Font, s_s_inboxColumnTitles[i], ForeColor,
+                DrawInboxCell(e.Graphics, Font, __sort.Heading(s_s_inboxColumnTitles[i], i), ForeColor,
                     boundaries[i], boundaries[i + 1], ClientRectangle);
             }
         }

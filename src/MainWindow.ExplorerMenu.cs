@@ -28,6 +28,7 @@ internal sealed partial class MainWindow
             menu.Items.Add("親フォルダを開く", null, async (_, _) => await OpenAndConfirm(item, parent, acknowledge));
         }
 
+        menu.Items.Add("確認済みにする", null, (_, _) => ConfirmCapturedTarget(item, acknowledge));
         menu.Items.Add("コピー", null, async (_, _) => await CopyInboxTarget(path));
         // テスト用の受け取り先があれば、実際に表示せずメニュー内容を渡す。
         if (__verifyShellMenu is { } verify)
@@ -106,7 +107,7 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 通知ツリーの入力と行アクションを管理する。
-    private sealed class InboxTree : TreeView
+    private sealed partial class InboxTree : TreeView
     {
         // 全列の位置は幅に依存する。ネイティブツリーの「増えた領域だけ」の再描画では足りない。
         /// @brief サイズ変更後の列配置を再描画する。
@@ -158,7 +159,7 @@ internal sealed partial class MainWindow
             {
                 int p = unchecked((int)message.LParam);
                 var pt = new Point((short)p, (short)(p >> 16));
-                var cols = GetInboxColumns(ClientSize.Width, DeviceDpi);
+                var cols = LayoutColumns;
                 var node = GetNodeAt(pt);
                 bool onRead = node?.Tag is InboxRow && pt.X >= cols.Action && pt.X < cols.End;
                 // 押下時の行を記憶し、別の行で離した場合の誤操作を防ぐ。

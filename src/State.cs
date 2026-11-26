@@ -7,7 +7,8 @@ namespace ShareFileWatch;
 internal sealed class WatchItem
 {
     public Guid Id { get; set; } = Guid.NewGuid(); //!< 登録を識別する ID または対象の絶対パス。
-    public string Path { get; set; } = ""; //!< 登録を識別する ID または対象の絶対パス。
+    public string Path { get; set; } = ""; //!< 監視対象の絶対パス。
+    public string DisplayName { get; set; } = ""; //!< 空なら実際のファイル・フォルダ名。
     public bool IsFolder
     {
         get; set;
@@ -21,6 +22,7 @@ internal sealed class WatchItem
         get; set;
     } //!< 範囲変更前の観測結果を捨てるための世代番号。
     // フォルダの比較基準。同じフォルダでも監視範囲を変えたときは新しい基準を作る。
+    public string[]? InventoryExclusions { get; set; } //!< 最後に成功した一覧を作った除外ルール。
     public Dictionary<string, Fingerprint>? Inventory
     {
         get; set;
@@ -112,25 +114,27 @@ internal sealed class WatchItem
         // 初回照会または監視範囲変更後は、現在の一覧を基準にして通知しない。
         if (Inventory is null)
         {
-            ReplaceInventory(result.Files, now);
+            ReplaceInventory(result.Files, result.Exclusions, now);
             return null;
         }
 
-        var changes = FolderProbe.Compare(Inventory, result.Files, now);
+        bool scopeChanged = !FileExclusions.Same(InventoryExclusions, result.Exclusions);
+        var changes = FolderProbe.Compare(Inventory, result.Files, now,
+            scopeChanged ? InventoryExclusions : null, scopeChanged ? result.Exclusions : null);
         // 子ファイルに差分がなければ、未読も履歴も増やさない。
         if (changes.Count == 0)
         {
             // 旧版から開いたときなど、表示用の時刻だけ補う。
             // 旧設定などで表示用の日時だけが欠けていれば、既存ファイルから補う。
-            if (LatestFileWriteAt is null && result.Files.Count != 0)
+            if (scopeChanged || (LatestFileWriteAt is null && result.Files.Count != 0))
             {
-                ReplaceInventory(result.Files, now);
+                ReplaceInventory(result.Files, result.Exclusions, now);
             }
 
             return null;
         }
 
-        ReplaceInventory(result.Files, now);
+        ReplaceInventory(result.Files, result.Exclusions, now);
         foreach (var change in changes)
         {
             onChange?.Invoke(System.IO.Path.Combine(Path, change.Relative), change.Kind);
@@ -142,9 +146,10 @@ internal sealed class WatchItem
     }
 
     /// @brief フォルダの比較基準と最新時刻を更新する。
-    private void ReplaceInventory(Dictionary<string, Fingerprint> files, DateTimeOffset now)
+    private void ReplaceInventory(Dictionary<string, Fingerprint> files, string[] exclusions, DateTimeOffset now)
     {
         Inventory = files;
+        InventoryExclusions = exclusions;
         LatestFileWriteAt = files.Count == 0 ? null : FileChange.GetModifiedTime(files.Values.Max(x => x.Modified), now);
     }
 
@@ -244,6 +249,9 @@ internal sealed class WatchItem
 internal sealed class AppState
 {
     public Queue<HistoryEntry> History { get; set; } = new(); //!< 保存する履歴の上限または検知順の履歴。
+    public string[] ExcludedFilePatterns { get; set; } = []; //!< 監視から外すファイル名パターン。
+    public int TextSizePoints { get; set; } = 10; //!< UI の基準文字サイズ（pt）。
+    public bool RenotifyUnread { get; set; } //!< 未読パスの再更新でも通知する。
     public bool ReadOnFileOpen { get; set; } = true; //!< 永続化する操作・監視・表示の設定。
     public bool? RecursiveFolders
     {

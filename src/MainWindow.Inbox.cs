@@ -17,14 +17,14 @@ internal sealed partial class MainWindow
     private Control __inboxActionBar = null!; //!< 受信箱の見出し・詳細・操作用の表示領域。
     private readonly ToolStripStatusLabel __unavailableTargets = new() { IsLink = true, Visible = false }; //!< 失敗した監視対象へ移動するリンク。
     private Button __toggleDetails = null!; //!< 詳細表示の切り替えと操作対象の説明。
-    private readonly Label __actionScope = new() { AutoSize = true, Anchor = AnchorStyles.Left }; //!< 詳細表示の切り替えと操作対象の説明。
+    private readonly Label __actionScope = new() { AutoEllipsis = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, MinimumSize = new Size(0, 21) }; //!< 詳細表示の切り替えと操作対象の説明。
     private readonly ImageList __inboxIcons = new() { ColorDepth = ColorDepth.Depth32Bit }; //!< 種類別のツリー用アイコン。
     private Button __scanNow = null!; //!< 手動で監視を更新するボタン。
     private readonly System.Windows.Forms.Timer __ageTimer = new() { Interval = 5000 }; //!< 相対時刻の表示だけを更新するタイマー。
 
     /// @brief 通知ツリーの表示行と監視対象を結びつける情報。
     private sealed record InboxRow(Guid Id, string Label, string? Relative, FileChange? Change, bool IsBranch,
-        DateTimeOffset? DetectedAt, DateTimeOffset? ModifiedAt, string Kind, bool IsFolder, bool Recursive = false);
+        DateTimeOffset? DetectedAt, DateTimeOffset? ModifiedAt, string Kind, bool IsFolder, bool Recursive = false, long? UnreadCount = null);
 
     /// @brief 受信箱の対応する表示領域とイベントを構築する。
     private void BuildInbox()
@@ -149,14 +149,18 @@ internal sealed partial class MainWindow
         list.Tag = WatchTheme.Role.Surface;
         list.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         list.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        __inboxColumns = new InboxColumnHeader(__inbox);
+        __inboxColumns = new InboxColumnHeader(__inbox, __inboxSort, column =>
+        {
+            __inboxSort.Toggle(column);
+            __inboxColumns.Invalidate();
+            RefreshInbox();
+        });
+        __inbox.ColumnsChanged += (_, _) => __inboxColumns.Invalidate();
         __inbox.ClientSizeChanged += (_, _) => __inboxColumns.Invalidate();
         list.Controls.Add(__inboxColumns, 0, 0);
         __inbox.BorderStyle = BorderStyle.None;
         __inbox.BackColor = WatchTheme.Surface;
         __inbox.ForeColor = WatchTheme.Ink;
-        __inbox.ItemHeight = 21;
-        __inbox.Indent = 18;
         __inbox.Margin = Padding.Empty;
         __inbox.ShowLines = false;
         __inbox.FullRowSelect = true;
@@ -256,17 +260,15 @@ internal sealed partial class MainWindow
         // 未読が変わったときだけ組み直す。展開状態・選択は安定したキーで復元する。
         var previous = Flatten(__inbox.Nodes).ToDictionary(x => x.Name, x => x.IsExpanded, StringComparer.OrdinalIgnoreCase);
         var selected = __inbox.SelectedNode?.Name;
-        var unread = __state.Items.Where(x => x.Unread > 0).OrderByDescending(x => x.LastChanged).ToArray();
+        var unread = __state.Items.Where(x => x.Unread > 0).ToArray();
         __inbox.BeginUpdate();
         try
         {
             __inbox.Nodes.Clear();
             var now = DateTimeOffset.Now;
-            foreach (var item in unread)
-            {
-                AddInboxTarget(item, now);
-            }
-
+            var roots = unread.Select(item => BuildInboxTarget(item, now)).ToArray();
+            Array.Sort(roots, CompareInboxNodes);
+            __inbox.Nodes.AddRange(roots);
             TreeNode? restoreSelection = null;
             foreach (var node in Flatten(__inbox.Nodes))
             {
@@ -320,30 +322,25 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 未読の対象や変更された子ファイルをツリーに追加する。
-    private void AddInboxTarget(WatchItem item, DateTimeOffset now)
+    private TreeNode BuildInboxTarget(WatchItem item, DateTimeOffset now)
     {
-        var path = Path.GetFileName(Path.TrimEndingDirectorySeparator(item.Path));
-        // ルートなど末尾の名前が空になる対象は、パス自体を表示名にする。
-        if (string.IsNullOrEmpty(path))
-        {
-            path = item.Path;
-        }
+        var title = TargetDisplayName(item);
 
-        string kind = item.IsFolder ? $"未読 {item.PendingFiles.Count + (long)item.SavedUnreadWithoutDetails}件" : (string.IsNullOrEmpty(item.LastChange) ? "更新" : item.LastChange);
+        long? unreadCount = item.IsFolder ? item.PendingFiles.Count + (long)item.SavedUnreadWithoutDetails : null;
+        string kind = item.IsFolder ? $"未読 {unreadCount}件" : (string.IsNullOrEmpty(item.LastChange) ? "更新" : item.LastChange);
         var root = NewNode(item.Id.ToString("N"),
-            new(item.Id, path, null, null, false, item.LastChanged, item.LastModified, kind, item.IsFolder,
-                item.IsFolder && item.Recursive), now);
+            new(item.Id, title, null, null, false, item.LastChanged, item.LastModified, kind, item.IsFolder,
+                item.IsFolder && item.Recursive, unreadCount), now);
 
         root.ToolTipText = item.Path;
         __inbox.ShowNodeToolTips = true;
-        __inbox.Nodes.Add(root);
         // 個別ファイルの登録には配下の変更ツリーを作らない。
         if (!item.IsFolder)
         {
-            return;
+            return root;
         }
 
-        foreach (var change in item.PendingFiles.Values.OrderBy(x => x.Relative, StringComparer.OrdinalIgnoreCase))
+        foreach (var change in item.PendingFiles.Values)
         {
             AddChangedFile(root, item.Id, change, now);
         }
@@ -356,6 +353,9 @@ internal sealed partial class MainWindow
                 Name = root.Name + "|legacy"
             });
         }
+        // まだウィンドウに取り付けていないノードを並べ、再挿入の描画コストを避ける。
+        SortInboxSiblings(root.Nodes);
+        return root;
     }
 
     /// @brief 未読の対象や変更された子ファイルをツリーに追加する。
