@@ -54,7 +54,7 @@ internal sealed partial class MainWindow
     }
 
     private static readonly string[] s_targetHeadings =
-        ["名前", "状態", "最終更新", "最終照会", "種類", "完全なパス"];
+        ["名前", "状態", "最終更新", "最終照会", "種類", "再帰監視", "変更通知", "照会時間", "完全なパス"];
     private static readonly string[] s_historyHeadings = ["検知日時", "変更", "ファイルパス"];
 
     private void BindTargetSorting()

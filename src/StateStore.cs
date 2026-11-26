@@ -6,22 +6,26 @@ namespace ShareFileWatch;
 /// @brief 実行ファイル横に状態を保存し、破損時はバックアップを検証する。
 internal sealed class StateStore(string file)
 {
-    private static readonly JsonSerializerOptions s_s_format = new() { WriteIndented = true }; //!< 設定ファイルのシリアライズ形式。
+    private static readonly JsonSerializerOptions s_s_format = new(); // Same schema; omit indentation in large inventories.
+    private readonly string __backup = file + ".bak", __temporary = file + ".tmp", __recoveryPrefix = file + ".broken-";
+    private readonly string __database = Path.ChangeExtension(file, ".sqlite3");
+    private readonly HashSet<string> __dbFiles = new(new[] { "", "-journal", "-wal", "-shm" }.Select(s => Path.ChangeExtension(file, ".sqlite3") + s), StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> __published = [];
+    private bool __prune;
 
     // 名前だけでなく保存先の絶対パスを照合し、別フォルダの同名ファイルは監視する。
     internal bool IsInternalFile(string path)
     {
         var name = Path.GetFullPath(path);
-        if (name.Equals(file, StringComparison.OrdinalIgnoreCase) ||
-            name.Equals(file + ".bak", StringComparison.OrdinalIgnoreCase) ||
-            name.Equals(file + ".tmp", StringComparison.OrdinalIgnoreCase))
+        if (__dbFiles.Contains(name) || name.Equals(file, StringComparison.OrdinalIgnoreCase) ||
+            name.Equals(__backup, StringComparison.OrdinalIgnoreCase) ||
+            name.Equals(__temporary, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        string recoveryPrefix = file + ".broken-";
-        return name.StartsWith(recoveryPrefix, StringComparison.OrdinalIgnoreCase) &&
-            Guid.TryParseExact(name[recoveryPrefix.Length..], "N", out _);
+        return name.StartsWith(__recoveryPrefix, StringComparison.OrdinalIgnoreCase) &&
+            Guid.TryParseExact(name.AsSpan(__recoveryPrefix.Length), "N", out _);
     }
 
     // 旧版キャッシュを基準にした初回巡回で、内部ファイルを「消失」と誤通知しない。
@@ -47,6 +51,7 @@ internal sealed class StateStore(string file)
                 }
                 if (excluded.Length != 0)
                 {
+                    item.SavedInventory = null;
                     item.LatestFileWriteAt = inventory.Count == 0 ? null :
                         FileChange.GetModifiedTime(inventory.Values.Max(x => x.Modified), DateTimeOffset.Now);
                 }
@@ -75,7 +80,7 @@ internal sealed class StateStore(string file)
         // 本体がなく同じ場所にバックアップがあれば、初期化せずそこから復元する。
         if (File.Exists(destination + ".bak"))
         {
-            store.Save(Read(destination + ".bak"));
+            store.Save(store.Read(destination + ".bak"));
             return store;
         }
         store.Save(new AppState());
@@ -93,7 +98,16 @@ internal sealed class StateStore(string file)
 
         try
         {
-            return (RemoveInternalObservations(Read(file)), null);
+            var state = RemoveInternalObservations(Read(file));
+            __published = SnapshotIds(state);
+            if (state.Version == 1 && state.Items.Any(i => i.Inventory != null))
+            {
+                // A migration write error isn't a corrupt source: never roll back to an older backup.
+                try { Save(state); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                { return (state, "比較一覧を移行できませんでした。保存時に再試行します：" + ex.Message); }
+            }
+            return (state, null);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -138,12 +152,12 @@ internal sealed class StateStore(string file)
     private void ArchivePrimary() => File.Move(file, file + ".broken-" + Guid.NewGuid().ToString("N"));
 
     /// @brief 入力から観測値または保存状態を読み込む。
-    private static AppState Read(string path)
+    private AppState Read(string path)
     {
         using var stream = File.OpenRead(path);
         var data = JsonSerializer.Deserialize<AppState>(stream) ?? throw new JsonException();
         // 未対応バージョンの設定は、現行形式として解釈しない。
-        if (data.Version != 1)
+        if (data.Version is not (1 or 2))
         {
             throw new NotSupportedException("この設定ファイルのバージョンには対応していません。");
         }
@@ -156,6 +170,10 @@ internal sealed class StateStore(string file)
         }
 
         ValidateItems(data.Items);
+        // 旧版は実効値のみ保存。既定値と異なるフォルダの監視範囲を保持する。
+        data.RecursiveFolders ??= true;
+        foreach (var item in data.Items.Where(i => i.IsFolder && i.Recursive != data.RecursiveFolders))
+            item.RecursiveOverride ??= item.Recursive;
         // 履歴が欠落しているかパスを特定できない項目があれば読み込みを中止する。
         if (data.History is null || data.History.Any(x => x is null || string.IsNullOrWhiteSpace(x.Path)))
         {
@@ -167,9 +185,12 @@ internal sealed class StateStore(string file)
             data.History.Dequeue();
         }
 
+        using var db = data.Items.Any(i => i.InventorySnapshot != null) ? new InventoryDb(__database, false) : null;
         foreach (var item in data.Items)
         {
+            if (item.InventorySnapshot is string id) item.Inventory = db!.Read(id);
             NormalizeDictionaries(item);
+            if (item.InventorySnapshot != null) item.SavedInventory = item.Inventory;
             item.InventoryExclusions = FileExclusions.Normalize(item.InventoryExclusions);
         }
 
@@ -214,7 +235,7 @@ internal sealed class StateStore(string file)
 
             // 不正な子パス・指紋・変更記録を含む一覧は、監視やシェル操作に渡さない。
             if (item.Inventory?.Any(entry => entry.Value is null || !IsRelativeEntry(entry.Key)) == true ||
-                item.PendingFiles.Any(entry => !IsRelativeEntry(entry.Key) || entry.Value is null ||
+                item.PendingFiles.Any(entry => !(item.IsFolder && entry.Key == ".") && !IsRelativeEntry(entry.Key) || entry.Value is null ||
                     entry.Value.Relative != entry.Key || entry.Value.Count < 1))
             {
                 throw new JsonException("変更記録が壊れています。");
@@ -241,6 +262,19 @@ internal sealed class StateStore(string file)
     public void Save(AppState state)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        var dirty = state.Items.Where(i => i.Inventory != null && !ReferenceEquals(i.Inventory,i.SavedInventory)).ToArray();
+        if (dirty.Length > 0)
+        {
+            using var db = new InventoryDb(__database, true);
+            db.Exec("BEGIN IMMEDIATE");
+            var ids = dirty.Select(i => db.Write(i.Inventory!)).ToArray();
+            db.Exec("COMMIT");
+            for (int n = 0; n < ids.Length; n++) { dirty[n].InventorySnapshot = ids[n]; dirty[n].SavedInventory = dirty[n].Inventory; }
+            __prune = true;
+        }
+        foreach (var item in state.Items.Where(i => i.Inventory == null)) { item.InventorySnapshot = null; item.SavedInventory = null; }
+        state.Version = 2;
+        var current = SnapshotIds(state);
         // 同じフォルダに一時ファイルを置く。Flush後に置換して部分書き込みを見せない。
         string temporary = file + ".tmp";
         try
@@ -260,6 +294,22 @@ internal sealed class StateStore(string file)
             {
                 File.Move(temporary, file);
             }
+            if ((__prune || !__published.SetEquals(current)) && File.Exists(__database))
+            {
+                var keep = new HashSet<string>(current);
+                // Read the actual backup, not the last in-memory state (important after recovery).
+                if (File.Exists(__backup))
+                {
+                    using var backup = File.OpenRead(__backup);
+                    using var json = JsonDocument.Parse(backup);
+                    foreach (var i in json.RootElement.GetProperty("Items").EnumerateArray())
+                        if (i.TryGetProperty("InventorySnapshot", out var id) && id.ValueKind == JsonValueKind.String) keep.Add(id.GetString()!);
+                }
+                using var db = new InventoryDb(__database,true);
+                db.Exec("BEGIN IMMEDIATE"); db.Prune(keep); db.Exec("COMMIT");
+                __prune = !keep.SetEquals(current);
+            }
+            __published = current;
         }
         finally
         {
@@ -270,4 +320,5 @@ internal sealed class StateStore(string file)
             }
         }
     }
+    private static HashSet<string> SnapshotIds(AppState state) => state.Items.Select(i => i.InventorySnapshot).OfType<string>().ToHashSet();
 }

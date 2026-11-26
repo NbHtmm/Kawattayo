@@ -7,7 +7,7 @@ namespace ShareFileWatch;
 /// @brief 受信箱と監視のライフサイクルを管理するメイン画面。
 internal sealed partial class MainWindow
 {
-    private Action<string, ContextMenuStrip>? __verifyShellMenu; //!< 実際の OS 操作に代えて回帰試験が観測するコールバック。
+    private Action<string, ContextMenuStrip>? __verifyShellMenu = null; //!< 実際の OS 操作に代えて回帰試験が観測するコールバック。
     /// @brief 対象の種類に合う操作だけをメニューに表示する。
     private void ShowInboxShellMenu(TreeNode node, Point screen)
     {
@@ -17,10 +17,13 @@ internal sealed partial class MainWindow
             return;
         }
 
-        __inbox.SelectedNode = node;
+        __inbox.SelectForMenu(node);
+        var nodes = __inbox.Selection();
         var menu = new ContextMenuStrip();
         var item = __state.Items.Single(x => x.Id == row.Id);
         var acknowledge = GetAcknowledgement(item, row);
+        if (nodes.Length == 1)
+        {
         menu.Items.Add("開く", null, async (_, _) => await OpenAndConfirm(item, path, acknowledge, row.IsFolder ? null : __verifyFileOpen ?? WindowsShell.OpenFile));
         // ファイル行で親を特定できるときだけ「親フォルダを開く」を追加する。
         if (!row.IsFolder && Path.GetDirectoryName(path) is { } parent)
@@ -28,8 +31,18 @@ internal sealed partial class MainWindow
             menu.Items.Add("親フォルダを開く", null, async (_, _) => await OpenAndConfirm(item, parent, acknowledge));
         }
 
-        menu.Items.Add("確認済みにする", null, (_, _) => ConfirmCapturedTarget(item, acknowledge));
-        menu.Items.Add("コピー", null, async (_, _) => await CopyInboxTarget(path));
+        }
+        var actions = CaptureRows(nodes);
+        menu.Items.Add("確認済みにする", null, (_, _) => ApplyAcknowledgements(actions));
+        menu.Items.Add("パスをコピー", null, (_, _) => CopyText(string.Join(Environment.NewLine, nodes.Select(ResolveInboxMenuPath).Distinct(StringComparer.OrdinalIgnoreCase))));
+        if (nodes.All(n => n.Parent == null))
+        {
+            var ids = nodes.Select(n => ((InboxRow)n.Tag!).Id).ToHashSet();
+            var targets = __state.Items.Where(x => ids.Contains(x.Id)).ToArray();
+            menu.Items.Add("登録解除", null, (_, _) => Unregister(targets));
+        }
+        var paths = nodes.Select(ResolveInboxMenuPath).OfType<string>().ToArray();
+        menu.Items.Add("コピー", null, async (_, _) => await CopyInboxTarget(paths));
         // テスト用の受け取り先があれば、実際に表示せずメニュー内容を渡す。
         if (__verifyShellMenu is { } verify)
         {
@@ -57,7 +70,7 @@ internal sealed partial class MainWindow
         }
         catch (ExternalException) { MessageBox.Show("クリップボードを使用できません。もう一度コピーしてください。", AppDefaults.AppName); }
     }
-    private Func<string, bool>? __verifyFileOpen; //!< 実際の OS 操作に代えて回帰試験が観測するコールバック。
+    private Func<string, bool>? __verifyFileOpen = null; //!< 実際の OS 操作に代えて回帰試験が観測するコールバック。
 
     /// @brief 行を実際の対象に解決して既定の操作で開く。
     private async Task OpenInboxItem(TreeNode node)
@@ -76,7 +89,7 @@ internal sealed partial class MainWindow
         }
 
         var (item, row) = selection;
-        bool isFile = !item.IsFolder || row.Change is not null;
+        bool isFile = !row.IsFolder;
         await OpenAndConfirm(item, path, GetAcknowledgement(item, row), isFile ? __verifyFileOpen ?? WindowsShell.OpenFile : null);
     }
 
@@ -91,7 +104,7 @@ internal sealed partial class MainWindow
         }
 
         // 登録のルート行は、子パスを連結せず登録パスをそのまま使う。
-        if (row.Relative is not { } relative)
+        if (row.Relative is not { } relative || relative == ".")
         {
             return item.Path;
         }
@@ -160,6 +173,11 @@ internal sealed partial class MainWindow
             {
                 int p = unchecked((int)message.LParam);
                 var pt = new Point((short)p, (short)(p >> 16));
+                if (message.Msg == 0x201 && GetInboxRowAt(pt) is { } hit &&
+                    !LayoutRow(hit, hit.Bounds).Toggle.Contains(pt) && !LayoutRow(hit, hit.Bounds).Read.Contains(pt))
+                {
+                    Focus(); SelectGesture(hit, ModifierKeys); return;
+                }
                 if (HandleRowAction(message.Msg, pt))
                 {
                     message.Result = 0;

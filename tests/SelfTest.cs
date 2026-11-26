@@ -21,6 +21,8 @@ internal static class SelfTest
             else
             {
                 TestCache(root.FullName, lines);
+                InventoryTests.Migrate(root.FullName);
+                lines.Add("PASS: legacy inventory migration, exact backup generation and missing database protection");
                 TestPortableStore(root.FullName, lines);
                 TestCacheExclusion(root.FullName, lines);
                 TestUserExclusions(root.FullName, lines);
@@ -359,7 +361,7 @@ internal static class SelfTest
     private static extern bool RemoveDirectoryW(string path);
 
     /// @brief 試験終了時に片付ける一時ディレクトリ。
-    private sealed class Fixture(DirectoryInfo directory) : IDisposable
+    internal sealed class Fixture(DirectoryInfo directory) : IDisposable
     {
         /// @brief 試験終了時に片付ける一時ディレクトリ。
         public string FullName => directory.FullName;
@@ -377,5 +379,5 @@ internal static class SelfTest
     }
 
     /// @brief 試験終了時に片付ける一時ディレクトリ。
-    private static Fixture AsFixture(this DirectoryInfo folder) => new(folder);
+    internal static Fixture AsFixture(this DirectoryInfo folder) => new(folder);
 }

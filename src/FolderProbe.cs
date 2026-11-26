@@ -26,6 +26,7 @@ internal sealed record FileChange(string Relative, string Kind, DateTimeOffset D
 /// @brief フォルダ内の比較用一覧または取得失敗理由。
 internal sealed record FolderResult(Dictionary<string, Fingerprint>? Files, string? Error = null)
 {
+    public long? DirectoryStamp { get; init; }
     public string[] Exclusions { get; init; } = []; //!< この一覧を取得した時点のファイル名除外ルール。
 }
 
@@ -36,11 +37,11 @@ internal static class FolderProbe
     private const int EntryLimit = 50_000; //!< 一回の列挙で保持できる項目数の上限。
 
     /// @brief 入力から観測値または保存状態を読み込む。
-    public static FolderResult Read(string root, bool recursive, Func<string, bool>? exclude = null)
+    public static FolderResult Read(string root, bool recursive, Func<string, bool>? exclude = null, CancellationToken cancellation = default)
     {
         try
         {
-            return new(TakeInventory(root, recursive, exclude));
+            return new(TakeInventory(root, recursive, exclude, cancellation));
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {
@@ -50,7 +51,7 @@ internal static class FolderProbe
     }
 
     /// @brief 監視範囲を走査し比較用辞書を構築する。
-    private static Dictionary<string, Fingerprint> TakeInventory(string root, bool recursive, Func<string, bool>? exclude)
+    private static Dictionary<string, Fingerprint> TakeInventory(string root, bool recursive, Func<string, bool>? exclude, CancellationToken cancellation, Action<string>? onEnumerate = null)
     {
         var files = new Dictionary<string, Fingerprint>(StringComparer.OrdinalIgnoreCase);
         // 深いフォルダでも呼び出しスタックを消費せず、親の検索を閉じてから子を開く。
@@ -60,9 +61,12 @@ internal static class FolderProbe
         while (pending.TryPop(out var relative))
         {
             var directory = Path.Combine(root, relative);
-            foreach (var entry in FileProbe.ListDirectory(directory, EntryLimit - visited))
+            cancellation.ThrowIfCancellationRequested();
+            onEnumerate?.Invoke(directory);
+            foreach (var entry in FileProbe.ListDirectory(directory, EntryLimit - visited, cancellation))
             {
                 visited++;
+                cancellation.ThrowIfCancellationRequested();
                 var path = Path.Combine(relative, entry.Name);
                 // ファイルは相対パスと指紋を今回の比較対象に加える。
                 if (!entry.IsFolder)
@@ -80,6 +84,83 @@ internal static class FolderProbe
             }
         }
         return files;
+    }
+
+    // Assemble a candidate locally. Never modify the last complete snapshot on a failed or cancelled read.
+    internal static FolderResult ReadChanges(string root, bool recursive, Dictionary<string,Fingerprint> baseline,
+        string[] paths, Func<string,bool> exclude, CancellationToken cancellation, Action<string>? onEnumerate = null)
+    {
+        var files = new Dictionary<string,Fingerprint>(baseline, StringComparer.OrdinalIgnoreCase);
+        HashSet<string>? formerFolders = null;
+        try
+        {
+            var covered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(p => p.Length))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var relative = Path.GetRelativePath(root,path);
+                if (relative == "." || relative == ".." || relative.StartsWith(@"..\") || Path.IsPathRooted(relative))
+                    return Read(root,recursive,exclude,cancellation);
+                if (CoveredByParent(relative)) continue;
+                bool CoveredByParent(string name)
+                {
+                    for (var p = Path.GetDirectoryName(name); !string.IsNullOrEmpty(p); p = Path.GetDirectoryName(p))
+                        if (covered.Contains(p)) return true;
+                    return false;
+                }
+                FileAttributes attributes;
+                try { attributes = File.GetAttributes(path); }
+                catch (IOException ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    if (!Directory.Exists(root)) return new(null,"登録フォルダに接続できません");
+                    RemoveTree(relative); covered.Add(relative); continue;
+                }
+                if (attributes.HasFlag(FileAttributes.ReparsePoint)) { RemoveTree(relative); covered.Add(relative); continue; }
+                if (attributes.HasFlag(FileAttributes.Directory))
+                {
+                    RemoveTree(relative);
+                    if (recursive)
+                        foreach (var (child,value) in TakeInventory(path,true,exclude,cancellation,onEnumerate))
+                            files[Path.Combine(relative,child)] = value;
+                    covered.Add(relative);
+                }
+                else
+                {
+                    // A single coalesced name can represent directory deletion followed by file creation.
+                    if (recursive && !files.ContainsKey(relative) && WasFolder(relative)) RemoveTree(relative);
+                    covered.Add(relative);
+                    if (exclude(path)) { files.Remove(relative); continue; }
+                    var result = FileProbe.Read(path);
+                    if (result.State == ProbeState.Unavailable) return new(null,result.Error);
+                    if (result.Fingerprint is {} fp) files[relative] = fp; else RemoveTree(relative);
+                }
+                if (files.Count > EntryLimit) return new(null,"監視範囲の上限を超えました。");
+            }
+            return new(files);
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException) { return new(null,ex.Message); }
+
+        bool WasFolder(string relative)
+        {
+            if (formerFolders == null)
+            {
+                formerFolders = new(StringComparer.OrdinalIgnoreCase);
+                foreach (var name in baseline.Keys)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    for (var p = Path.GetDirectoryName(name); !string.IsNullOrEmpty(p) && formerFolders.Add(p); p = Path.GetDirectoryName(p)) { }
+                }
+            }
+            return formerFolders.Contains(relative);
+        }
+
+        void RemoveTree(string relative)
+        {
+            files.Remove(relative);
+            if (!recursive) return;
+            string prefix = relative + Path.DirectorySeparatorChar;
+            foreach (var key in files.Keys.Where(k => k.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)).ToArray()) files.Remove(key);
+        }
     }
 
     /// @brief 前回と今回の一覧から追加・変更・消失を求める。

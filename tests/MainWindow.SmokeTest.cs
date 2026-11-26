@@ -9,6 +9,10 @@ internal sealed partial class MainWindow
     internal async Task ExerciseUi(string path, string cache, Action<bool> setOpen, string? previewDirectory)
     {
         VerifyEmptyLayout(previewDirectory);
+        await VerifyQuietScan(Path.GetDirectoryName(path)!);
+        SelfTest.Check(__allRecursive.Checked && !__readOnOpen.Checked && !__state.NotifyDeleted && __state.ExcludedFilePatterns.SequenceEqual(["~$*"]), "first-run defaults");
+        __readOnOpen.Checked = true;
+        __state.NotifyDeleted = true;
         await VerifyManualScan(path, cache);
         VerifyHistoryTheme(path, previewDirectory);
         await VerifyFileAcknowledgement(path, setOpen);
@@ -25,6 +29,7 @@ internal sealed partial class MainWindow
         await VerifyIndependentShares();
         await VerifyTargetOptions(path);
         await VerifyExclusionSettings(Path.GetDirectoryName(path)!);
+        VerifyBatchOperations();
         VerifyTrayLifetime();
     }
 
@@ -175,7 +180,7 @@ internal sealed partial class MainWindow
         __settingsTabs.SelectedIndex = 0;
         await RegisterDrop(drop);
         await Scan();
-        SelfTest.Check(__targetList.Items.Count == 2 && !__state.Items[1].Recursive, "drop adds folder and skips duplicate file");
+        SelfTest.Check(__targetList.Items.Count == 2 && __state.Items[1].Recursive && __targetList.Items[1].SubItems[5].Text == "デフォルト", "new folders inherit recursive default");
         SelfTest.Check(__targetList.Columns[4].Text == "種類" && __targetList.Items[0].SubItems[4].Text == "ファイル" && __targetList.Items[1].SubItems[4].Text == "フォルダ", "targets show registered file and folder kinds");
         __targetList.Items[0].Selected = false;
         __targetList.Items[1].Selected = true;
@@ -554,6 +559,14 @@ internal sealed partial class MainWindow
                 ShowInboxShellMenu(node, Point.Empty);
                 SelfTest.Check(await copied.Task.WaitAsync(TimeSpan.FromSeconds(5)) == (path, (int)DragDropEffects.Copy), "copy menu publishes file drop list with copy effect");
             }
+            var multiple = new TaskCompletionSource<string[]>();
+            __verifyFileCopy = data => multiple.TrySetResult(data.GetFileDropList().Cast<string>().ToArray());
+            var rows = new[] { file, folder }.Select(p => Flatten(__inbox.Nodes).First(n => ResolveInboxMenuPath(n) == p)).ToArray();
+            __inbox.SelectGesture(rows[0], Keys.None);
+            __inbox.SelectGesture(rows[1], Keys.Control);
+            ShowInboxShellMenu(rows[1], Point.Empty);
+            SelfTest.Check((await multiple.Task.WaitAsync(TimeSpan.FromSeconds(5))).ToHashSet().SetEquals([folder, file]), "copy menu publishes every selected path");
+            __inbox.SelectGesture(rows[0], Keys.None);
             bool written = false;
             __verifyFileCopy = _ => written = true;
             await CopyInboxTarget(Path.Combine(folder, "nonexistent-copy-test"));
@@ -568,7 +581,9 @@ internal sealed partial class MainWindow
         string? openedFor = null;
         __verifyShellMenu = (path, menu) =>
         {
-            SelfTest.Check(menu.Items.Cast<ToolStripItem>().Select(i => i.Text).SequenceEqual(path == changed ? new[] { "開く", "親フォルダを開く", "確認済みにする", "コピー" } : new[] { "開く", "確認済みにする", "コピー" }), "context menu is scoped to target kind");
+            var labels = menu.Items.Cast<ToolStripItem>().Select(i => i.Text).ToHashSet();
+            SelfTest.Check(labels.Contains("開く") && labels.Contains("コピー") && labels.Contains("パスをコピー") && labels.Contains("確認済みにする") &&
+                labels.Contains("親フォルダを開く") == (path == changed) && !labels.Contains("再帰監視をオン"), "context menu is scoped to target kind");
             openedFor = path;
         };
         try

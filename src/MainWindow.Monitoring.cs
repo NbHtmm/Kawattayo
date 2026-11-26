@@ -8,9 +8,28 @@ internal sealed partial class MainWindow
     private string? __pollError;
     private readonly HashSet<string> __activeScanRoots = new(StringComparer.OrdinalIgnoreCase);
     private ScanPass? __latestScanPass;
+    private readonly HashSet<CancellationTokenSource> __runningScans = [];
+    private readonly System.Windows.Forms.Timer __progressTimer = new() { Interval = 500 };
+    // Shared by all roots, UI thread only. Never wait for a slow share before checkpointing.
+    private readonly System.Windows.Forms.Timer __scanFlush = new() { Interval = 150 };
+    private bool __rowsPending, __inboxPending;
+    private readonly List<string> __alertsPending = [];
+
+    private void FlushScanUpdates()
+    {
+        __scanFlush.Stop();
+        if (!__rowsPending || __exiting || IsDisposed) return;
+        __rowsPending = false;
+        if (__hasUnsavedChanges) Save();
+        if (__inboxPending) RefreshHistory();
+        RefreshRows(__inboxPending);
+        __inboxPending = false;
+        NotifyNewChanges(__alertsPending);
+        __alertsPending.Clear();
+    }
 
     // テストから共有先の応答を止められる。通常時は同期 Win32 API をワーカーで実行する。
-    private Func<string, ProbeResult>? __testFileProbe;
+    private Func<string, ProbeResult>? __testFileProbe = null;
 
     private void StartTimer(bool immediate = false)
     {
@@ -25,7 +44,7 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 空いている共有先だけ巡回。応答待ちの共有先は次の周期でも重複実行しない。
-    private Task Scan()
+    private Task Scan(bool automatic = false)
     {
         __pollTimer.Stop();
         if (__exiting || __state.Paused || __state.Items.Count == 0)
@@ -35,9 +54,17 @@ internal sealed partial class MainWindow
 
         // 同じ UNC 共有（ローカル・割当ドライブはドライブ単位）への照会は直列に保つ。
         var exclusions = __state.ExcludedFilePatterns; // 巡回開始時のルールをワーカーに渡す。
+        var low = __state.LowServerLoad && automatic;
+        var feeds = low ? PrepareFeeds() : null;
+        bool Due(WatchItem i)
+        {
+            if (!low || !__checks.TryGetValue(i.Id,out var c) || !c.Reliable || c.Revision != i.Revision) return true;
+            var f = feeds!.GetValueOrDefault(i.Id);
+            return f != c.Feed || f != null && (f.Epoch != c.Epoch || f.Watcher != null && (f.Failed || f.Stamp(i.IsFolder,i.Path) != c.Stamp));
+        }
         var groups = __state.Items
-            .Where(x => x.IsFolder || !FileExclusions.Matches(x.Path, exclusions))
-            .Select(x => new ScanTarget(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision, exclusions))
+            .Where(x => (x.IsFolder || !FileExclusions.Matches(x.Path, exclusions)) && Due(x))
+            .Select(x => new ScanTarget(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision, exclusions, __state.WatchDirectoryTime, low, feeds?.GetValueOrDefault(x.Id)))
             .GroupBy(x => Path.TrimEndingDirectorySeparator(Path.GetPathRoot(x.Path)!), StringComparer.OrdinalIgnoreCase)
             .Where(x => __activeScanRoots.Add(x.Key))
             .ToArray();
@@ -60,6 +87,9 @@ internal sealed partial class MainWindow
     private async Task ScanRoot(string root, IEnumerable<ScanTarget> targets, int generation, ScanPass pass)
     {
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var stop = new CancellationTokenSource();
+        __runningScans.Add(stop);
+        __progressTimer.Start();
         try
         {
             foreach (var target in targets)
@@ -69,7 +99,22 @@ internal sealed partial class MainWindow
                     break;
                 }
 
-                var result = await Task.Run(() => ProbeTarget(target));
+                var feed = target.Feed;
+                var item = __state.Items.Find(i => i.Id == target.Id);
+                if (item == null) continue;
+                item.QueryStart = Environment.TickCount64;
+                try
+                {
+                if (feed != null) await feed.Start(Environment.TickCount64);
+                if (!CanApplyScan(generation)) break;
+                long stamp = feed?.Stamp(target.IsFolder,target.Path) ?? 0;
+                string[]? paths = null;
+                var baseline = item.Inventory;
+                if (target.IsFolder && baseline != null && feed is { Failed:false, Watcher:not null } &&
+                    __checks.TryGetValue(target.Id,out var prior) && prior.Reliable && prior.Feed == feed &&
+                    prior.Epoch == feed.Epoch && prior.Revision == target.Revision)
+                    (stamp,paths) = feed.Snapshot(prior.Stamp);
+                var result = await Task.Run(() => ProbeTarget(target, stop.Token, baseline, paths));
                 if (!CanApplyScan(generation))
                 {
                     break;
@@ -77,8 +122,24 @@ internal sealed partial class MainWindow
 
                 // 待ち時間の長い別対象を待たず、取得できた結果を UI スレッドで反映する。
                 ApplyResult(result, pass, seenPaths);
+                if (!target.Low && (result.Folder is { Files:null } || result.File?.State == ProbeState.Unavailable))
+                    __checks.Remove(target.Id);
+                if (target.Low && __state.LowServerLoad)
+                {
+                    bool reliable = feed is { Watcher: not null, Failed: false } &&
+                        (target.IsFolder ? result.Folder?.Files != null : result.File?.State != ProbeState.Unavailable);
+                    __checks[target.Id] = new(target.Revision,feed,stamp,reliable,feed?.Epoch ?? 0);
+                }
+                }
+                finally
+                {
+                    item.QueryMs = Environment.TickCount64 - item.QueryStart!.Value;
+                    item.QueryStart = null;
+                    item.QueryStopped = stop.IsCancellationRequested;
+                }
             }
         }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
         catch (Exception ex)
         {
             if (CanApplyScan(generation))
@@ -89,8 +150,12 @@ internal sealed partial class MainWindow
         finally
         {
             __activeScanRoots.Remove(root);
+            __runningScans.Remove(stop);
             if (!__exiting && !IsDisposed)
             {
+                if (__runningScans.Count == 0) __progressTimer.Stop();
+                FlushScanUpdates();
+                RefreshProgressCells();
                 UpdateStatus();
             }
         }
@@ -99,15 +164,21 @@ internal sealed partial class MainWindow
     private bool CanApplyScan(int generation) =>
         !__exiting && !IsDisposed && !__state.Paused && generation == __scanGeneration;
 
-    private ScanResult ProbeTarget(ScanTarget target)
+    private ScanResult ProbeTarget(ScanTarget target, CancellationToken cancellation = default, Dictionary<string,Fingerprint>? baseline = null, string[]? paths = null)
     {
         FolderResult? folder = null;
         ProbeResult? file = null;
         if (target.IsFolder)
         {
-            folder = FolderProbe.Read(target.Path, target.Recursive,
-                path => FileExclusions.Matches(path, target.Exclusions) || __store.IsInternalFile(path))
-                with { Exclusions = target.Exclusions };
+            bool Excluded(string path) => FileExclusions.Matches(path,target.Exclusions) || __store.IsInternalFile(path);
+            folder = (paths != null && baseline != null ? FolderProbe.ReadChanges(target.Path,target.Recursive,baseline,paths,Excluded,cancellation)
+                : FolderProbe.Read(target.Path,target.Recursive,Excluded,cancellation)) with { Exclusions = target.Exclusions };
+            // Saving the app's own cache changes its parent directory's timestamp.
+            if (folder.Files != null && target.WatchTime && !__store.IsInternalFile(Path.Combine(target.Path, AppDefaults.CacheFileName)))
+            {
+                try { folder = folder with { DirectoryStamp = Directory.GetLastWriteTimeUtc(target.Path).ToFileTimeUtc() }; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { folder = new(null, ex.Message); }
+            }
         }
         else if (__store.IsInternalFile(target.Path))
         {
@@ -120,26 +191,28 @@ internal sealed partial class MainWindow
         return new(target.Id, target.Revision, file, folder, DateTimeOffset.Now);
     }
 
-    private sealed record ScanTarget(Guid Id, string Path, bool IsFolder, bool Recursive, int Revision, string[] Exclusions);
+    private sealed record ScanTarget(Guid Id, string Path, bool IsFolder, bool Recursive, int Revision, string[] Exclusions, bool WatchTime, bool Low = false, ChangeFeed? Feed = null);
     private sealed record ScanResult(Guid Id, int Revision, ProbeResult? File, FolderResult? Folder, DateTimeOffset At);
     private sealed class ScanPass
     {
         public int AlertCount { get; set; }
     }
 
-    private void ApplyResult(ScanResult result, ScanPass pass, HashSet<string> seenPaths)
+    private bool ApplyResult(ScanResult result, ScanPass pass, HashSet<string> seenPaths)
     {
         // 登録解除済み、または監視範囲変更前の結果を反映しない。
         var item = __state.Items.Find(x => x.Id == result.Id);
         if (item is null || item.Revision != result.Revision)
         {
-            return;
+            return false;
         }
 
         var pending = new Lazy<HashSet<string>>(PendingPaths);
         var alerts = new List<string>();
         bool changed = false;
         var baselineBefore = item.Baseline;
+        var inventoryBefore = item.Inventory;
+        var stampBefore = item.DirectoryStamp;
         var inventoryExclusionsBefore = item.InventoryExclusions;
         var lastWriteBefore = item.LatestFileWriteAt;
         void Record(string path, string kind)
@@ -151,32 +224,31 @@ internal sealed partial class MainWindow
 
         if (result.Folder is { } folder)
         {
-            item.ObserveFolder(folder, result.At, Record);
+            item.ObserveFolder(folder, result.At, Record, __state.NotifyDeleted);
         }
         else
         {
-            item.Observe(result.File!, result.At, Record);
+            item.Observe(result.File!, result.At, Record, __state.NotifyDeleted);
         }
 
         __lastPoll = result.At;
         bool exclusionScopeChanged = !FileExclusions.Same(inventoryExclusionsBefore, item.InventoryExclusions ?? []);
-        if (changed || exclusionScopeChanged || item.Baseline != baselineBefore ||
+        if (changed || inventoryBefore != item.Inventory || stampBefore != item.DirectoryStamp || exclusionScopeChanged || item.Baseline != baselineBefore ||
             item.LatestFileWriteAt != lastWriteBefore || __hasUnsavedChanges)
         {
-            Save();
+            __hasUnsavedChanges = true;
         }
-        if (changed)
-        {
-            RefreshHistory();
-        }
+        __rowsPending = true;
+        __inboxPending |= changed;
 
         pass.AlertCount += alerts.Count;
         if (ReferenceEquals(pass, __latestScanPass))
         {
             __lastAlertCount = pass.AlertCount;
         }
-        NotifyNewChanges(alerts);
-        RefreshRows(changed);
+        __alertsPending.AddRange(alerts);
+        if (!__scanFlush.Enabled) __scanFlush.Start();
+        return changed;
     }
 
     /// @brief 同じ巡回で重複したパスを除き、履歴と初回の未読通知に反映する。

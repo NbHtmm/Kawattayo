@@ -9,6 +9,7 @@
 *.code-workspace
 *.log
 cache.json*
+cache.sqlite3*
 *.pubxml*
 .env*
 *.pfx

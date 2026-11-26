@@ -41,21 +41,23 @@ internal sealed partial class MainWindow
         strip.Items.Add(__unavailableTargets);
         __unavailableTargets.Click += (_, _) => { __settingsTabs.SelectedIndex = 0; ShowManagement(); };
         page.Controls.Add(strip, 0, 2);
-        Controls.Add(page);
+        __viewport.Controls.Add(page);
+        Controls.Add(__viewport);
+        __viewport.ClientSizeChanged += (_, _) => SizeInboxPage();
         __inbox.AccessibleName = "未読のファイル変更";
         __inbox.ShellMenuRequested += ShowInboxShellMenu;
         __inbox.KeyDown += async (_, e) =>
         {
             // Ctrl+C は選択行の対象を特定できる場合だけファイルコピーとして処理する。
-            if (e.KeyData == (Keys.Control | Keys.C) && __inbox.SelectedNode is { } n && ResolveInboxMenuPath(n) is { } path)
+            if (e.KeyData == (Keys.Control | Keys.C))
             {
                 e.SuppressKeyPress = true;
-                await CopyInboxTarget(path);
+                await CopyInboxTarget(__inbox.Selection().Select(ResolveInboxMenuPath).OfType<string>().ToArray());
             }
         };
         __inbox.AfterSelect += (_, _) => UpdateSelectedDetails();
         __inbox.DefaultOpenRequested += async node => await OpenInboxItem(node);
-        __inbox.ReadRequested += node => { __inbox.SelectedNode = node; MarkInboxRead(); };
+        __inbox.ReadRequested += node => { __inbox.SelectForMenu(node); MarkInboxRead(); };
         __ageTimer.Tick += (_, _) =>
         {
             // 非表示の受信箱では、経過時間の再描画を省く。
@@ -75,12 +77,21 @@ internal sealed partial class MainWindow
         __scanNow.MinimumSize = Size.Empty;
         __scanNow.Size = new Size(35, 35);
         __scanNow.Padding = Padding.Empty;
+        __scanNow.Margin = new Padding(0, 0, 4, 0);
         __scanNow.Paint += (_, e) => WatchTheme.DrawRefreshGlyph(__scanNow, e.Graphics);
         __scanNow.AccessibleName = "更新（Ctrl+R）";
         var hint = new ToolTip();
         hint.SetToolTip(__scanNow, __scanNow.AccessibleName);
         __scanNow.Disposed += (_, _) => hint.Dispose();
-        var actions = WatchTheme.Actions(__scanNow,
+        TopMost = __state.Pinned;
+        var pin = WatchTheme.Button(TopMost ? "最前面 ON" : "最前面 OFF", () => {}, primary: TopMost, name: "pinWindow");
+        pin.Click += (_, _) => {
+            TopMost = __state.Pinned = !TopMost;
+            pin.Text = TopMost ? "最前面 ON" : "最前面 OFF";
+            pin.Tag = TopMost ? WatchTheme.Role.Primary : null;
+            WatchTheme.Apply(pin); Save();
+        };
+        var actions = WatchTheme.Actions(__scanNow, pin,
             WatchTheme.Button("履歴", ShowHistory, name: "openHistory"),
             WatchTheme.Button("設定…", ShowManagement, name: "openManagement"));
         var header = WatchTheme.Layout(1, 2);
@@ -88,7 +99,7 @@ internal sealed partial class MainWindow
         header.AutoSize = true;
         header.BackColor = WatchTheme.Surface;
         header.Tag = WatchTheme.Role.Surface;
-        header.Padding = new Padding(12, 5, 6, 1);
+        header.Padding = new Padding(12, 2, 6, 0);
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         __inboxSummary.BackColor = WatchTheme.Unread;
@@ -125,6 +136,7 @@ internal sealed partial class MainWindow
         __toggleDetails = WatchTheme.Button("詳細 ▾", () =>
         {
             __inboxDetails.Visible = !__inboxDetails.Visible;
+            SizeInboxPage();
             __toggleDetails.Text = __inboxDetails.Visible ? "詳細 ▴" : "詳細 ▾";
         }, name: "toggleDetails");
         __actionScope.ForeColor = WatchTheme.Muted;
@@ -132,11 +144,13 @@ internal sealed partial class MainWindow
         __actionScope.Margin = new Padding(4, 0, 0, 4);
         var bar = WatchTheme.Layout(1, 2);
         bar.AutoSize = true;
-        bar.Margin = new Padding(0, 6, 0, 0);
+        bar.Margin = new Padding(0, 1, 0, 0);
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.Controls.Add(__actionScope, 0, 0);
-        bar.Controls.Add(__toggleDetails, 1, 0);
+        __clearDeleted = WatchTheme.Button("消失通知を消す", ClearDeletionNotices);
+        bar.Controls.Add(WatchTheme.Actions(WatchTheme.Button("すべて展開", __inbox.ExpandAll),
+            WatchTheme.Button("すべて折りたたむ", __inbox.CollapseAll), __clearDeleted, __toggleDetails), 1, 0);
         return bar;
     }
 
@@ -228,15 +242,20 @@ internal sealed partial class MainWindow
     private void UpdateInboxAges()
     {
         var now = DateTimeOffset.Now;
-        foreach (var node in Flatten(__inbox.Nodes))
+        for (var node = __inbox.TopNode; node != null && node.Bounds.Top < __inbox.ClientSize.Height; node = node.NextVisibleNode)
         {
             // 検知時刻または更新時刻がある行だけ経過時間を書き直す。
             if (node.Tag is InboxRow row && (row.DetectedAt is not null || row.ModifiedAt is not null))
             {
-                PaintAge(node, row, now);
+                if (InboxAge(row, now) != InboxAge(row, __lastAgePaint))
+                    __inbox.Invalidate(new Rectangle(__inbox.LayoutColumns.Detected, node.Bounds.Top,
+                        __inbox.LayoutColumns.Action - __inbox.LayoutColumns.Detected, node.Bounds.Height));
             }
         }
+        __lastAgePaint = now;
     }
+    private DateTimeOffset __lastAgePaint;
+    private Button __clearDeleted = null!;
 
     /// @brief 監視対象と設定を現在の状態で表示する。
     private void ShowManagement()
@@ -258,6 +277,7 @@ internal sealed partial class MainWindow
         var previous = Flatten(__inbox.Nodes).ToDictionary(x => x.Name, x => x.IsExpanded, StringComparer.OrdinalIgnoreCase);
         var selected = __inbox.SelectedNode?.Name;
         var unread = __state.Items.Where(x => x.Unread > 0).ToArray();
+        __clearDeleted.Visible = unread.Any(i => i.IsFolder ? i.PendingFiles.Values.Any(c => c.Kind == "消失") : i.LastChange == "消失");
         __inbox.BeginUpdate();
         try
         {
@@ -302,6 +322,7 @@ internal sealed partial class MainWindow
             __inbox.SelectedNode = restoreSelection ?? __inbox.Nodes.Cast<TreeNode>().FirstOrDefault();
         }
         finally { __inbox.EndUpdate(); }
+        MeasureInboxPage();
         __inboxSummary.Text = $"未読 {PendingPaths().Count + unread.Where(x => x.IsFolder).Sum(x => (long)x.SavedUnreadWithoutDetails)}件";
 
         __inbox.Visible = unread.Length > 0;
@@ -359,6 +380,12 @@ internal sealed partial class MainWindow
     private static void AddChangedFile(TreeNode root, Guid id, FileChange change, DateTimeOffset now)
     {
         var pieces = change.Relative.Split(Path.DirectorySeparatorChar);
+        if (change.Relative == ".")
+        {
+            root.Nodes.Add(NewNode(root.Name + "|stamp", new(id, "このフォルダの更新日時", ".", change, false,
+                change.DetectedAt, change.ModifiedAt, change.Kind, true), now));
+            return;
+        }
         // 空の名前や親参照を含む子パスはツリーに追加しない。
         if (pieces.Any(p => p.Length == 0 || p is "." or ".."))
         {
@@ -493,7 +520,7 @@ internal sealed partial class MainWindow
             return;
         }
 
-        GetAcknowledgement(selection.Item, selection.Row)();
+        foreach (var action in CaptureRows(__inbox.Selection())) action();
         Save();
         RefreshRows();
     }

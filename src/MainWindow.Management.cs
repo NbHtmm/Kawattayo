@@ -95,19 +95,12 @@ internal sealed partial class MainWindow
             }
         };
         __pause.Click += (_, _) => TogglePause();
-        var prior = __state.Items.Where(x => x.IsFolder).Select(x => x.Recursive).Distinct().ToArray();
-        __state.RecursiveFolders ??= prior.Length == 1 ? prior[0] : prior.Length == 0 ? false : null;
-        // 再帰設定の有効・無効・混在をチェックボックスの三状態で表す。
-        __allRecursive.CheckState = __state.RecursiveFolders switch
-        {
-            true => CheckState.Checked,
-            false => CheckState.Unchecked,
-            null => CheckState.Indeterminate
-        };
+        __allRecursive.Text = "デフォルトでサブフォルダも再帰的に監視";
+        __allRecursive.Checked = __state.RecursiveFolders != false;
         __allRecursive.CheckStateChanged += (_, _) =>
         {
             __state.RecursiveFolders = __allRecursive.Checked;
-            foreach (var item in __state.Items.Where(x => x.IsFolder))
+            foreach (var item in __state.Items.Where(x => x.IsFolder && x.RecursiveOverride == null))
             {
                 item.SetRecursive(__allRecursive.Checked);
             }
@@ -116,7 +109,15 @@ internal sealed partial class MainWindow
             RefreshRows();
             StartTimer(immediate: true);
         };
-        card.Controls.Add(new SettingsGroup("監視", WatchTheme.Stack(WatchTheme.Actions(cadence, __pollIntervalInput, __pause), __allRecursive)), 0, 0);
+        var directoryTime = new CheckBox { AutoSize = true, Text = "登録フォルダ自身の更新日時も監視", Checked = __state.WatchDirectoryTime };
+        directoryTime.CheckedChanged += (_, _) => {
+            __state.WatchDirectoryTime = directoryTime.Checked;
+            foreach (var item in __state.Items.Where(x => x.IsFolder)) { item.DirectoryStamp = null; item.Revision++; }
+            Save(); StartTimer(immediate: true);
+        };
+        var quiet = new CheckBox { AutoSize = true, Text = "サーバー負荷を抑える（変更通知を優先）", Checked = __state.LowServerLoad };
+        quiet.CheckedChanged += (_, _) => { __state.LowServerLoad = quiet.Checked; ResetQuietScan(); Save(); StartTimer(immediate: true); };
+        card.Controls.Add(new SettingsGroup("監視", WatchTheme.Stack(WatchTheme.Actions(cadence, __pollIntervalInput, __pause), __allRecursive, directoryTime, quiet)), 0, 0);
         __description.ForeColor = WatchTheme.Muted;
         __description.Tag = WatchTheme.Role.Muted;
         __description.Margin = new Padding(0, 2, 0, 0);
@@ -133,7 +134,9 @@ internal sealed partial class MainWindow
         __readOnOpen.Margin = new Padding(0, 8, 0, 2);
         __renotifyUnread.Checked = __state.RenotifyUnread;
         __renotifyUnread.CheckedChanged += (_, _) => { __state.RenotifyUnread = __renotifyUnread.Checked; Save(); };
-        card.Controls.Add(new SettingsGroup("通知と既読", WatchTheme.Stack(__keepInTrayOption, __description, __readOnOpen, __renotifyUnread)), 0, 1);
+        var deletions = new CheckBox { AutoSize = true, Text = "ファイルの削除（消失）を通知", Checked = __state.NotifyDeleted };
+        deletions.CheckedChanged += (_, _) => { __state.NotifyDeleted = deletions.Checked; Save(); };
+        card.Controls.Add(new SettingsGroup("通知と既読", WatchTheme.Stack(__keepInTrayOption, __description, __readOnOpen, __renotifyUnread, deletions)), 0, 1);
         card.Controls.Add(new SettingsGroup("表示", WatchTheme.Stack(__darkModeOption, BuildDisplaySizeControl())), 0, 2);
         card.Controls.Add(new SettingsGroup("除外するファイル", BuildExclusionOptions()), 0, 3);
         return card;
@@ -155,7 +158,8 @@ internal sealed partial class MainWindow
         __addTarget = WatchTheme.Button("＋ 追加 ▾", () => pickerMenu.Show(__addTarget, new Point(0, __addTarget.Height)), primary: true);
         __addTarget.Disposed += (_, _) => pickerMenu.Dispose();
         __summary.Anchor = AnchorStyles.Left;
-        card.Controls.Add(WatchTheme.Actions(__addTarget, __summary), 0, 0);
+        __stopQuery = WatchTheme.Button("照会を中断", TogglePause);
+        card.Controls.Add(WatchTheme.Actions(__addTarget, __summary, __stopQuery), 0, 0);
         BuildColumns();
         card.Controls.Add(__targetList, 0, 1);
         __targetSelection = new SelectionFooter(__targetList, row => row.Tag is Guid id ? RowText(row) + (__state.Items.FirstOrDefault(x => x.Id == id)?.Error is { } error ? "  " + error : "") : "");
@@ -179,6 +183,9 @@ internal sealed partial class MainWindow
         __targetList.Columns.Add("最終更新", 170);
         __targetList.Columns.Add("最終照会", 170);
         __targetList.Columns.Add("種類", 84);
+        __targetList.Columns.Add("再帰監視", 115);
+        __targetList.Columns.Add("変更通知", 160);
+        __targetList.Columns.Add("照会時間", 125);
         var pathColumn = __targetList.Columns.Add("完全なパス", 300);
         __targetList.ClientSizeChanged += (_, _) => FitTargetPathColumn(pathColumn);
         __targetList.HandleCreated += (_, _) => FitTargetPathColumn(pathColumn);
@@ -190,7 +197,7 @@ internal sealed partial class MainWindow
                 FitTargetPathColumn(pathColumn);
             }
         };
-        __targetList.MultiSelect = false;
+        __targetList.MultiSelect = true;
         BindTargetSorting();
         __targetList.DoubleClick += async (_, _) =>
         {
@@ -261,7 +268,8 @@ internal sealed partial class MainWindow
             return;
         }
 
-        var menu = BuildTargetMenu(item);
+        var ids = __targetList.SelectedItems.Cast<ListViewItem>().Select(x => x.Tag).OfType<Guid>().ToHashSet();
+        var menu = ids.Contains(item.Id) && ids.Count > 1 ? BuildBatchMenu(__state.Items.Where(x => ids.Contains(x.Id)).ToArray()) : BuildTargetMenu(item);
         menu.Closed += (_, _) => BeginInvoke(new Action(menu.Dispose));
         menu.Show(__targetList, location);
     }
@@ -377,15 +385,16 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 実体を削除せず監視登録だけを解除する。
-    private void Unregister(WatchItem item)
+    private void Unregister(params WatchItem[] items)
     {
         // 通常操作では登録解除の確認を求め、同意がなければ監視対象を残す。
-        if (!__testMode && MessageBox.Show(__management, $"監視登録を解除しますか？\n{item.Path}\n実ファイルは削除されません。", AppDefaults.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        if (!__testMode && MessageBox.Show(this, $"{items.Length}件の監視登録を解除しますか？\n{string.Join("\n",items.Take(5).Select(x => x.Path))}\n実ファイルは削除されません。", AppDefaults.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
         {
             return;
         }
 
-        __state.Items.Remove(item);
+        foreach (var item in items) __state.Items.Remove(item);
+        if (__state.Items.Count == 0) ResetQuietScan();
         Save();
         RefreshRows();
         StartTimer(immediate: true);
@@ -441,6 +450,25 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 選択行を再利用しながら監視結果を設定一覧へ反映する。
+    private Button __stopQuery = null!;
+    private string FeedStatus(WatchItem item)
+    {
+        if (__state.Paused) return "一時停止";
+        if (!item.IsFolder && FileExclusions.Matches(item.Path,__state.ExcludedFilePatterns)) return "除外";
+        if (!__state.LowServerLoad) return "オフ（毎回照会）";
+        if (!__checks.TryGetValue(item.Id,out var c)) return "未確認";
+        return c.Feed switch { null => "購読枠外（毎回照会）", { Watcher:not null, Failed:false } => c.Reliable ? "通知待機中" : "通知あり・照会失敗（毎回照会）", _ => "利用不可（毎回照会）" };
+    }
+    private static string QueryDuration(WatchItem i) => i.QueryStart is long start ? $"照会中 {(Environment.TickCount64-start)/1000.0:F1} 秒" :
+        i.QueryMs is long ms ? $"{(i.QueryStopped ? "中断 " : "")}{ms/1000.0:F3} 秒" : "—";
+    private void RefreshProgressCells()
+    {
+        if (!__management.Visible && !__testMode) return;
+        var items = __state.Items.ToDictionary(i => i.Id);
+        foreach (ListViewItem row in __targetList.Items)
+            if (row.Tag is Guid id && items.TryGetValue(id,out var item) && row.SubItems[7].Text != QueryDuration(item))
+                row.SubItems[7].Text = QueryDuration(item);
+    }
     private void UpdateManagementRow(ListViewItem row, WatchItem item)
     {
         var health = item.Error is not null ? "⚠ 監視失敗" : item.LastChecked is null ? "未照会" : item.Baseline == ProbeState.Missing ? "対象なし" : "正常";
@@ -448,7 +476,9 @@ internal sealed partial class MainWindow
         {
             health = "除外中";
         }
-        string[] values = [TargetDisplayName(item), health, Time(item.LatestFileWriteAt, true), Time(item.LastChecked, true), item.IsFolder ? "フォルダ" : "ファイル", item.Path];
+        if (item.Unread > 0) health = "● 未読 / " + health;
+        string scope = !item.IsFolder ? "—" : item.RecursiveOverride switch { true => "ON", false => "OFF", null => "デフォルト" };
+        string[] values = [TargetDisplayName(item), health, Time(item.LatestFileWriteAt, true), Time(item.LastChecked, true), item.IsFolder ? "フォルダ" : "ファイル", scope, FeedStatus(item), QueryDuration(item), item.Path];
         for (int i = 0; i < values.Length; i++)
         {
             // セルの表示値が変わった場合だけ一覧を書き換える。

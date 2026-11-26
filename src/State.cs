@@ -13,6 +13,7 @@ internal sealed class WatchItem
     {
         get; set;
     } //!< フォルダ種別および配下を再帰監視する設定。
+    public bool? RecursiveOverride { get; set; }
     public bool Recursive
     {
         get; set;
@@ -23,10 +24,18 @@ internal sealed class WatchItem
     } //!< 範囲変更前の観測結果を捨てるための世代番号。
     // フォルダの比較基準。同じフォルダでも監視範囲を変えたときは新しい基準を作る。
     public string[]? InventoryExclusions { get; set; } //!< 最後に成功した一覧を作った除外ルール。
+    public string? InventorySnapshot { get; set; }
+    internal Dictionary<string, Fingerprint>? SavedInventory { get; set; }
+    internal long? QueryStart, QueryMs;
+    internal bool QueryStopped;
+    [JsonIgnore]
     public Dictionary<string, Fingerprint>? Inventory
     {
         get; set;
     } //!< 前回正常に取得した比較基準。
+    // Read old JSON inventories but never write one to the settings file.
+    [JsonPropertyName("Inventory"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, Fingerprint>? LegacyInventory { get => null; set => Inventory = value; }
     public ProbeState? Baseline
     {
         get; set;
@@ -69,7 +78,9 @@ internal sealed class WatchItem
     } //!< 取得できなかった理由。正常なときは null。
 
     /// @brief 前回成功時の基準と比較し、通信断を削除と区別する。
-    public string? Observe(ProbeResult result, DateTimeOffset now, Action<string, string>? onChange = null)
+    public long? DirectoryStamp { get; set; }
+
+    public string? Observe(ProbeResult result, DateTimeOffset now, Action<string, string>? onChange = null, bool notifyDeleted = true)
     {
         LastChecked = now;
         // 照会不能は消失と区別し、最後に成功した比較基準を保持する。
@@ -80,6 +91,7 @@ internal sealed class WatchItem
         }
         Error = null;
         var change = DetectChange(result);
+        if (!notifyDeleted && change == "消失") change = null;
         // 変更があったときだけ、その変更に対応する実ファイルの更新時刻を見直す。
         if (change is not null)
         {
@@ -100,7 +112,7 @@ internal sealed class WatchItem
     }
 
     /// @brief 前回成功時の基準と比較し、通信断を削除と区別する。
-    public string? ObserveFolder(FolderResult result, DateTimeOffset now, Action<string, string>? onChange = null)
+    public string? ObserveFolder(FolderResult result, DateTimeOffset now, Action<string, string>? onChange = null, bool notifyDeleted = true)
     {
         LastChecked = now;
         // フォルダを列挙できない場合は前回一覧を残し、子ファイルの消失にしない。
@@ -111,6 +123,8 @@ internal sealed class WatchItem
         }
         Error = null;
         Baseline = ProbeState.Found;
+        var priorStamp = DirectoryStamp;
+        DirectoryStamp = result.DirectoryStamp;
         // 初回照会または監視範囲変更後は、現在の一覧を基準にして通知しない。
         if (Inventory is null)
         {
@@ -121,6 +135,10 @@ internal sealed class WatchItem
         bool scopeChanged = !FileExclusions.Same(InventoryExclusions, result.Exclusions);
         var changes = FolderProbe.Compare(Inventory, result.Files, now,
             scopeChanged ? InventoryExclusions : null, scopeChanged ? result.Exclusions : null);
+        if (!notifyDeleted && changes.RemoveAll(x => x.Kind == "消失") != 0)
+            ReplaceInventory(result.Files, result.Exclusions, now);
+        if (priorStamp.HasValue && DirectoryStamp is long stamp && stamp != priorStamp)
+            changes.Add(new(".", "更新", now, FileChange.GetModifiedTime(stamp, now)));
         // 子ファイルに差分がなければ、未読も履歴も増やさない。
         if (changes.Count == 0)
         {
@@ -248,15 +266,16 @@ internal sealed class WatchItem
 /// @brief exe と同じ場所に保存するアプリ全体の状態。
 internal sealed class AppState
 {
+    public bool Pinned { get; set; }
+    public bool LowServerLoad { get; set; } = true;
+    public bool WatchDirectoryTime { get; set; }
+    public bool NotifyDeleted { get; set; }
     public Queue<HistoryEntry> History { get; set; } = new(); //!< 保存する履歴の上限または検知順の履歴。
-    public string[] ExcludedFilePatterns { get; set; } = []; //!< 監視から外すファイル名パターン。
+    public string[] ExcludedFilePatterns { get; set; } = ["~$*"]; //!< Office のロックファイルを既定で除外する。
     public int TextSizePoints { get; set; } = 10; //!< UI の基準文字サイズ（pt）。
     public bool RenotifyUnread { get; set; } //!< 未読パスの再更新でも通知する。
-    public bool ReadOnFileOpen { get; set; } = true; //!< 永続化する操作・監視・表示の設定。
-    public bool? RecursiveFolders
-    {
-        get; set;
-    } //!< 永続化する操作・監視・表示の設定。
+    public bool ReadOnFileOpen { get; set; }
+    public bool? RecursiveFolders { get; set; } = true;
     public bool DarkMode
     {
         get; set;

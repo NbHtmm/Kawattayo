@@ -62,7 +62,9 @@ internal sealed partial class MainWindow : Form
         ConfigureTray();
         ApplyTheme();
         RefreshRows();
-        __pollTimer.Tick += async (_, _) => await Scan();
+        __pollTimer.Tick += async (_, _) => await Scan(automatic: true);
+        __scanFlush.Tick += (_, _) => FlushScanUpdates();
+        __progressTimer.Tick += (_, _) => RefreshProgressCells();
         Shown += (_, _) =>
         {
             // テストは巡回のタイミングを制御するため、通常の起動処理を行わない。
@@ -169,6 +171,8 @@ internal sealed partial class MainWindow : Form
     private void TogglePause()
     {
         __state.Paused = !__state.Paused;
+        foreach (var scan in __runningScans) scan.Cancel();
+        ResetQuietScan();
         __scanGeneration++; // 一時停止を挟んだ古い照会結果は採用しない。
         Save();
         RefreshRows();
@@ -231,6 +235,8 @@ internal sealed partial class MainWindow : Form
         __unavailableTargets.BackColor = WatchTheme.FailureSurface;
         // 巡回中に無効化するとフォーカスが隣の履歴へ移る。二重実行は Scan の busy 判定で防ぐ。
         __scanNow.Enabled = !__state.Paused && __state.Items.Count > 0;
+        __stopQuery.Enabled = __state.Paused || __isScanning;
+        __stopQuery.Text = __state.Paused ? "監視を再開" : "照会を中断";
     }
 
     // 設定・差分・確認操作だけを同期保存する。変化のない巡回はキャッシュを書かない。
@@ -319,6 +325,10 @@ internal sealed partial class MainWindow : Form
         if (disposing)
         {
             __pollTimer.Dispose();
+            ResetQuietScan();
+            __scanFlush.Dispose();
+            foreach (var scan in __runningScans) scan.Cancel();
+            __progressTimer.Dispose();
             __ageTimer.Dispose();
             __management?.Dispose();
             __tray.Dispose();

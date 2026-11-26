@@ -9,15 +9,20 @@ Windows x64 用の共有ファイル・フォルダ更新モニターです。�
 テストでは通常の設定を使いません。コマンドプロンプトで次を実行し、終了コードとレポートを確認してください。SMB テストにはローカルのループバック共有へのアクセスが必要です。
 
 ```bat
-start /wait "" "bin\かわったよ.exe" --self-test build\self.txt
-start /wait "" "bin\かわったよ.exe" --ui-test build\preview-ui.txt
+tests\run.bat
 ```
 
 ## GitHub Releases 用 ZIP
 
+テストコードと実行バッチは `tests\`、レポート・画面画像・テスト専用 exe は `build\tests\` に分離しています。配布版には自己テストを組み込みません。
+
 Windows の PowerShell で `.\tool\package.ps1` を実行すると、ビルドから `build\Kawattayo_win_x64.zip` の作成まで行います。ZIP には実行ファイル、使い方、プロジェクトの MIT ライセンス、同梱した .NET ランタイムパックのライセンスと通知（パック提供分）だけが入ります。設定・履歴・レポートは含めません。このコマンドは GitHub にアップロードしません。
 
 ## プライバシーとライセンス
+
+フォルダ内の前回比較一覧は `cache.sqlite3`、設定・未読・通知履歴は `cache.json` に保存します。Windows 内蔵 SQLite を使用します。旧版 JSON 内の一覧は初回読み込みで移行します。バックアップ・PC 間の移動はアプリを終了してから `cache.json`、`cache.json.bak`、`cache.sqlite3` をセットでコピーしてください。いずれも実パスを含むため公開しないでください。
+
+大規模検証は `tests\run.bat` の後に `build\tests\runner\Tests.exe --sqlite-scale`。隔離した一時フォルダに実ファイル3万件を作成します。
 
 設定・履歴・対象パスは exe の横の `cache.json` に保存します。キャッシュ、バックアップ、レポート、スクリーンショットには実際のパスが含まれることがあります。公開しないでください。コミットやリリースには秘密情報がないか確認してください。
 

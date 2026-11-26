@@ -6,6 +6,7 @@ internal sealed partial class MainWindow
     private async Task VerifyExclusionSettings(string root)
     {
         var folder = Directory.CreateDirectory(Path.Combine(root, "gui-exclusions")).FullName;
+        SetExcludedFilePatterns([]); // exercise opting out, then re-applying the Office preset
         var temp = Path.Combine(folder, "~$GuiDraft.docx");
         var ordinary = Path.Combine(folder, "GuiDraft.docx");
         await File.WriteAllTextAsync(temp, "office lock");

@@ -132,8 +132,17 @@ internal sealed partial class MainWindow
 
         // Font.Height は描画用 DPI を含まない場合があるため、同じ単位（px）にそろえる。
         int fontPixels = ScreenFontHeight(__inbox);
+        int side = ScaleForDisplay(__scanNow, 35);
+        __scanNow.Size = new Size(side, side);
         __inbox.ItemHeight = Math.Max(ScaleForDisplay(__inbox, 21, scaleText: false), fontPixels + ScaleForDisplay(__inbox, 4, scaleText: false));
         __inbox.Indent = ScaleForDisplay(__inbox, 18);
+        foreach (var button in DisplayDescendants(this).OfType<Button>().Where(b => b.AutoSize))
+        {
+            button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            button.MinimumSize = new Size(ScaleForDisplay(button, 48), button.Parent == __scanNow.Parent ? side : ScaleForDisplay(button, 27));
+            button.Margin = new Padding(0, 0, 4, 0);
+        }
+        MeasureInboxPage();
         __inboxColumns.Height = fontPixels + ScaleForDisplay(__inbox, 8, scaleText: false);
         __selectedPath.Height = fontPixels * 2 + ScaleForDisplay(__selectedPath, 8, scaleText: false);
         __inbox.Invalidate();
@@ -183,49 +192,6 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 通常の設定操作を通して文字サイズと狭い一覧の列境界を確認する。
-    private void VerifyDisplayTypography()
-    {
-        int baseline = __state.TextSizePoints;
-        int previousHeight = __inbox.ItemHeight;
-        Size mainWindowSize = Size;
-        Size settingsSize = __management.Size;
-        int activeTab = __settingsTabs.SelectedIndex;
-        var option = (NumericUpDown)__management.Controls.Find("displayTextSize", true).Single();
-        try
-        {
-            Size = MinimumSize;
-            __management.Size = __management.MinimumSize;
-            __settingsTabs.SelectedIndex = 1;
-            option.Value = MaximumDisplayPoints;
-            PerformLayout();
-
-            SelfTest.Check(Font.SizeInPoints == MaximumDisplayPoints &&
-                __inbox.Font.SizeInPoints == MaximumDisplayPoints &&
-                __targetList.Font.SizeInPoints == MaximumDisplayPoints &&
-                __inbox.ItemHeight > previousHeight &&
-                __store.Load().State.TextSizePoints == MaximumDisplayPoints,
-                "display text size applies to both screens, resizes rows, and persists");
-
-            var columns = __inbox.LayoutColumns;
-            SelfTest.Check(columns.Change > 0 && columns.Change < columns.Updater &&
-                columns.Updater < columns.Detected && columns.Detected < columns.Action &&
-                columns.Action < columns.End, "large text keeps compact inbox columns ordered");
-
-            var options = (Panel)__settingsTabs.TabPages[1].Controls[0];
-            options.ScrollControlIntoView(option);
-            SelfTest.Check(options.AutoScroll && options.ClientRectangle.Contains(
-                options.RectangleToClient(option.RectangleToScreen(option.ClientRectangle))),
-                "the text size input remains reachable at small window size");
-        }
-        finally
-        {
-            option.Value = baseline;
-            __settingsTabs.SelectedIndex = activeTab;
-            __management.Size = settingsSize;
-            Size = mainWindowSize;
-        }
-    }
-
     private void DisposeDisplayFonts()
     {
         foreach (var font in __displayFonts.Values)

@@ -73,11 +73,11 @@ internal sealed partial class MainWindow
         }
 
         var cols = __inbox.LayoutColumns;
-        bool selected = e.Node == __inbox.SelectedNode;
+        bool selected = __inbox.IsChosen(e.Node);
         bool highContrast = SystemInformation.HighContrast;
-        Color foreground = selected && highContrast ? SystemColors.HighlightText : WatchTheme.Ink;
+        Color foreground = selected ? SystemColors.HighlightText : WatchTheme.Ink;
         Color background = selected
-            ? (highContrast ? SystemColors.Highlight : WatchTheme.Unread)
+            ? SystemColors.Highlight
             : e.Bounds.Top / Math.Max(1, __inbox.ItemHeight) % 2 == 0 || highContrast
                 ? WatchTheme.Surface : WatchTheme.Dark ? WatchTheme.Window : Color.FromArgb(246, 248, 251);
 

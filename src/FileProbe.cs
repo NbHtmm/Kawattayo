@@ -144,7 +144,7 @@ internal static class FileProbe
 
     // 一覧照会のハンドルは一つのフォルダを読み終えた時点で閉じる。
     /// @brief 直下の項目を列挙し、検索ハンドルを解放する。
-    internal static List<DirectoryEntry> ListDirectory(string path, int maxEntries)
+    internal static List<DirectoryEntry> ListDirectory(string path, int maxEntries, CancellationToken cancellation = default)
     {
         var items = new List<DirectoryEntry>();
         var handle = FindFirstFileW(ExtendedPath(Path.Combine(path, "*")), out var data);
@@ -164,6 +164,7 @@ internal static class FileProbe
         {
             do
             {
+                cancellation.ThrowIfCancellationRequested();
                 // 親や自分自身への参照とリンクを除外し、監視範囲の外へ進まない。
                 if (data.Name is "." or ".." || (data.Attributes & ReparsePointAttribute) != 0)
                 {

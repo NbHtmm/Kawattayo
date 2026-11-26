@@ -163,10 +163,10 @@ internal static class WatchTheme
                 e.DrawDefault = true;
                 return;
             }
-            Color bg = row.Selected ? Color.FromArgb(58, 85, 115) : row.BackColor;
+            Color bg = row.Selected ? SystemColors.Highlight : row.BackColor;
             using var brush = new SolidBrush(bg);
             e.Graphics.FillRectangle(brush, e.Bounds);
-            TextRenderer.DrawText(e.Graphics, cell.Text, list.Font, Rectangle.Inflate(e.Bounds, -4, 0), row.Selected ? Ink : row.ForeColor,
+            TextRenderer.DrawText(e.Graphics, cell.Text, list.Font, Rectangle.Inflate(e.Bounds, -4, 0), row.Selected ? SystemColors.HighlightText : row.ForeColor,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             // キーボードフォーカスがある行の先頭セルだけにフォーカス枠を描く。
             if (row.Focused && list.Focused && e.ColumnIndex == 0)

@@ -3,12 +3,14 @@ namespace ShareFileWatch;
 /// @brief 受信箱と監視のライフサイクルを管理するメイン画面。
 internal sealed partial class MainWindow
 {
-    private Action<DataObject>? __verifyFileCopy; //!< 実際の OS 操作に代えて回帰試験が観測するコールバック。
+    private Action<DataObject>? __verifyFileCopy = null; //!< 実際の OS 操作に代えて回帰試験が観測するコールバック。
 
     /// @brief 選択したファイルまたはフォルダを Explorer 貼り付け形式にする。
-    private async Task CopyInboxTarget(string path)
+    private async Task CopyInboxTarget(params string[] selected)
     {
-        bool exists = await Task.Run(() => File.Exists(path) || Directory.Exists(path));
+        var paths = selected.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (paths.Length == 0) return;
+        var missing = await Task.Run(() => paths.FirstOrDefault(p => !File.Exists(p) && !Directory.Exists(p)));
         // 存在確認の間に画面が閉じられたらコピー操作を続けない。
         if (IsDisposed || __exiting)
         {
@@ -16,12 +18,12 @@ internal sealed partial class MainWindow
         }
 
         // 元の対象が見つからなければクリップボードを書き換えない。
-        if (!exists)
+        if (missing != null)
         {
             // 対話実行のときだけコピーできない理由を利用者に知らせる。
             if (!__testMode)
             {
-                MessageBox.Show(this, "対象が見つからないか、アクセスできないためコピーできません。\n" + path, AppDefaults.AppName);
+                MessageBox.Show(this, "次の対象を確認できないためコピーしませんでした。\n" + missing, AppDefaults.AppName);
             }
 
             return;
@@ -29,7 +31,9 @@ internal sealed partial class MainWindow
         // CF_HDROP と COPY (移動ではない) を渡す。実体の転送は貼り付け先の Explorer が行う。
         using var effect = new MemoryStream(BitConverter.GetBytes((int)DragDropEffects.Copy));
         var data = new DataObject();
-        data.SetFileDropList(new System.Collections.Specialized.StringCollection { path });
+        var files = new System.Collections.Specialized.StringCollection();
+        files.AddRange(paths);
+        data.SetFileDropList(files);
         data.SetData("Preferred DropEffect", false, effect);
         // テストではデータ形式だけを検証し、利用者のクリップボードには触れない。
         if (__verifyFileCopy is { } verify)
@@ -70,7 +74,7 @@ internal sealed partial class MainWindow
                 if (e.KeyData == (Keys.Control | Keys.C))
                 {
                     e.SuppressKeyPress = true;
-                    CopyText(__current());
+                    CopyText(string.Join(Environment.NewLine, list.SelectedItems.Cast<ListViewItem>().Select(describe)));
                 }
             };
             Sync();
