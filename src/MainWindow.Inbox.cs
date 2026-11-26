@@ -18,7 +18,6 @@ internal sealed partial class MainWindow
     private readonly ToolStripStatusLabel __unavailableTargets = new() { IsLink = true, Visible = false }; //!< 失敗した監視対象へ移動するリンク。
     private Button __toggleDetails = null!; //!< 詳細表示の切り替えと操作対象の説明。
     private readonly Label __actionScope = new() { AutoEllipsis = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, MinimumSize = new Size(0, 21) }; //!< 詳細表示の切り替えと操作対象の説明。
-    private readonly ImageList __inboxIcons = new() { ColorDepth = ColorDepth.Depth32Bit }; //!< 種類別のツリー用アイコン。
     private Button __scanNow = null!; //!< 手動で監視を更新するボタン。
     private readonly System.Windows.Forms.Timer __ageTimer = new() { Interval = 5000 }; //!< 相対時刻の表示だけを更新するタイマー。
 
@@ -164,11 +163,9 @@ internal sealed partial class MainWindow
         __inbox.Margin = Padding.Empty;
         __inbox.ShowLines = false;
         __inbox.FullRowSelect = true;
-        __inbox.DrawMode = TreeViewDrawMode.OwnerDrawText;
+        __inbox.ShowPlusMinus = false; // 開閉マークはファイルアイコンと同じ倍率で描く。
+        __inbox.DrawMode = TreeViewDrawMode.OwnerDrawAll;
         __inbox.DrawNode += DrawInboxRow;
-        __inboxIcons.Images.Add("file", DrawInboxIcon(folder: false));
-        __inboxIcons.Images.Add("folder", DrawInboxIcon(folder: true));
-        __inbox.ImageList = __inboxIcons;
 
         var content = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         __inboxEmpty = new Panel { Dock = DockStyle.Fill, BackColor = WatchTheme.Surface };
@@ -393,8 +390,7 @@ internal sealed partial class MainWindow
     /// @brief 行情報からツリーノードを生成する。
     private static TreeNode NewNode(string name, InboxRow row, DateTimeOffset now)
     {
-        string icon = row.IsFolder ? "folder" : "file";
-        var node = new TreeNode { Name = name, Tag = row, ImageKey = icon, SelectedImageKey = icon };
+        var node = new TreeNode { Name = name, Tag = row };
         PaintAge(node, row, now);
         return node;
     }

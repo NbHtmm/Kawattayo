@@ -195,8 +195,16 @@ internal sealed partial class MainWindow
              __inbox.Nodes[0].Nodes[0].Nodes[0].Text.Contains("changed.txt"), "main tree only shows changed nested file");
         SelfTest.Check(!__inbox.Nodes[0].IsExpanded && __inbox.SelectedNode == __inbox.Nodes[0],
             "recursive folder starts collapsed without selecting hidden content");
-        SelfTest.Check(__inbox.Nodes[0].ImageKey == "folder" && __inbox.Nodes[0].Nodes[0].Nodes[0].ImageKey == "file",
-            "folder and file use distinct icons");
+        using var folderIcon = new Bitmap(32, 32);
+        using var fileIcon = new Bitmap(32, 32);
+        using var folderGraphics = Graphics.FromImage(folderIcon);
+        using var fileGraphics = Graphics.FromImage(fileIcon);
+        DrawInboxIcon(folderGraphics, new Rectangle(0, 0, 32, 32), folder: true);
+        DrawInboxIcon(fileGraphics, new Rectangle(0, 0, 32, 32), folder: false);
+        SelfTest.Check(__inbox.Nodes[0].Tag is InboxRow { IsFolder: true } &&
+            __inbox.Nodes[0].Nodes[0].Nodes[0].Tag is InboxRow { IsFolder: false } &&
+            folderIcon.GetPixel(4, 20).A > 0 && fileIcon.GetPixel(4, 20).A == 0,
+            "folder and file use distinct drawn icons");
         SelfTest.Check(!__inboxDetails.Visible, "details do not occupy the list by default");
         __inbox.Nodes[0].Expand();
         __inbox.Nodes[0].Nodes[0].Expand();
@@ -246,7 +254,7 @@ internal sealed partial class MainWindow
         await File.AppendAllTextAsync(changed, "unread after opening parent");
         await Scan();
         __inbox.SelectedNode = Flatten(__inbox.Nodes).Single(x => x.Tag is InboxRow { Label: "stable.txt" });
-        var ackPoint = (GetInboxColumns(__inbox.Width, __inbox.DeviceDpi).Action + 6) | ((__inbox.SelectedNode.Bounds.Top + 5) << 16);
+        nint ackPoint = InboxClickPoint(__inbox.LayoutRow(__inbox.SelectedNode, __inbox.SelectedNode.Bounds).Read);
         SendMessage(__inbox.Handle, 0x201, 1, ackPoint);
         SendMessage(__inbox.Handle, 0x202, 0, ackPoint);
         SelfTest.Check(__state.Items[1].PendingFiles.Count == 1, "inline read acknowledges only the clicked file");
@@ -446,8 +454,9 @@ internal sealed partial class MainWindow
     private async Task VerifyExplorerDefaultOpen(string changed, string folder)
     {
         var fileRow = __inbox.Nodes[0].Nodes[0].Nodes[0];
-        var bounds = fileRow.Bounds;
-        nint point = unchecked((int)((ushort)(bounds.Left + 3) | ((uint)(ushort)(bounds.Top + 4) << 16)));
+        VerifyScaledInboxRowHitTargets(fileRow.Parent!);
+        var bounds = __inbox.LayoutRow(fileRow, fileRow.Bounds).Icon;
+        nint point = InboxClickPoint(bounds);
         // 通常クリックとダブルクリックで、同じ座標に対して動作が変わる。
         int opens = 0;
         string? openedPath = null;
@@ -478,6 +487,42 @@ internal sealed partial class MainWindow
         }
         finally { __verifyFileOpen = null; }
     }
+
+    private void VerifyScaledInboxRowHitTargets(TreeNode folder)
+    {
+        var original = __inbox.Font;
+        var baseline = __inbox.LayoutRow(folder, folder.Bounds);
+        try
+        {
+            __inbox.Font = GetDisplayFont(MaximumDisplayPoints, FontStyle.Regular);
+            ResizeInboxMetrics();
+            var large = __inbox.LayoutRow(folder, folder.Bounds);
+            SelfTest.Check(large.Icon.Width > baseline.Icon.Width && large.Toggle.Width > baseline.Toggle.Width,
+                "file and disclosure icons track text size");
+            SelfTest.Check(folder.IsExpanded, "expanded folder is ready for disclosure hit test");
+            var justOutside = new Rectangle(large.Toggle.Right, large.Toggle.Top, 1, large.Toggle.Height);
+            SendMessage(__inbox.Handle, 0x203, 1, InboxClickPoint(justOutside));
+            SelfTest.Check(folder.IsExpanded && !__isOpeningTarget, "outside the marker neither toggles nor opens");
+            nint point = InboxClickPoint(large.Toggle);
+            SendMessage(__inbox.Handle, 0x201, 1, point);
+            SendMessage(__inbox.Handle, 0x202, 0, InboxClickPoint(justOutside));
+            SelfTest.Check(folder.IsExpanded, "dragging outside the disclosure target does not toggle");
+            SendMessage(__inbox.Handle, 0x201, 1, point);
+            SendMessage(__inbox.Handle, 0x202, 0, point);
+            SelfTest.Check(!folder.IsExpanded, "clicking the large disclosure target collapses the folder");
+            SendMessage(__inbox.Handle, 0x201, 1, point);
+            SendMessage(__inbox.Handle, 0x202, 0, point);
+            SelfTest.Check(folder.IsExpanded, "clicking the same target expands the folder again");
+        }
+        finally
+        {
+            __inbox.Font = original;
+            ResizeInboxMetrics();
+        }
+    }
+
+    private static nint InboxClickPoint(Rectangle rect) =>
+        (rect.Left + rect.Width / 2) | ((rect.Top + rect.Height / 2) << 16);
 
     /// @brief 開く操作がタイムアウト前に終了するのを待つ。
     private async Task WaitForItemOpen()

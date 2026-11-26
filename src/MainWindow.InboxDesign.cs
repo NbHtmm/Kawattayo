@@ -81,16 +81,15 @@ internal sealed partial class MainWindow
             : e.Bounds.Top / Math.Max(1, __inbox.ItemHeight) % 2 == 0 || highContrast
                 ? WatchTheme.Surface : WatchTheme.Dark ? WatchTheme.Window : Color.FromArgb(246, 248, 251);
 
-        // アイコンと展開ボタンは Windows に描画させ、テキストだけを列に振り分ける。
+        // アイコン・開閉マーク・ボタンの四角形を入力処理と共有する。
+        var layout = __inbox.LayoutRow(e.Node, e.Bounds);
+        var rowBounds = new Rectangle(0, e.Bounds.Top, cols.End, e.Bounds.Height);
         using var brush = new SolidBrush(background);
-        // 正の描画幅がある範囲だけ行の背景を塗る。
-        if (cols.End > e.Bounds.Left)
-        {
-            e.Graphics.FillRectangle(brush, Rectangle.FromLTRB(e.Bounds.Left, e.Bounds.Top, cols.End, e.Bounds.Bottom));
-        }
+        e.Graphics.FillRectangle(brush, rowBounds);
+        DrawInboxRowSymbols(e.Graphics, layout, row.IsFolder, e.Node.IsExpanded, foreground);
 
         var font = __inbox.Font;
-        DrawInboxCell(e.Graphics, font, row.Label, foreground, e.Bounds.Left - 4, cols.Change, e.Bounds);
+        DrawInboxCell(e.Graphics, font, row.Label, foreground, layout.Label.Left - 4, cols.Change, e.Bounds);
         // 選択色とハイコントラストを優先し、それ以外は追加・消失などの変更種別で色を分ける。
         Color changeColor = highContrast || selected ? foreground : row.Kind switch
         {
@@ -101,7 +100,7 @@ internal sealed partial class MainWindow
         DrawInboxCell(e.Graphics, font, row.Kind, changeColor, cols.Change, cols.Updater, e.Bounds);
         DrawInboxCell(e.Graphics, font, InboxUpdater(row), foreground, cols.Updater, cols.Detected, e.Bounds);
         DrawInboxCell(e.Graphics, font, InboxAge(row, DateTimeOffset.Now), foreground, cols.Detected, cols.Action, e.Bounds);
-        var button = Rectangle.FromLTRB(cols.Action + 2, e.Bounds.Top + 1, cols.End - 2, e.Bounds.Bottom - 1);
+        var button = layout.Read;
         if (button.Width > 0 && button.Height > 0)
         {
             ControlPaint.DrawBorder(e.Graphics, button, WatchTheme.Border, ButtonBorderStyle.Solid);
@@ -109,18 +108,28 @@ internal sealed partial class MainWindow
         }
 
         // 選択行にキーボードフォーカスがある場合だけ、フォーカス枠を描く。
-        if (selected && __inbox.Focused && cols.End > e.Bounds.Left)
+        if (selected && __inbox.Focused)
         {
-            ControlPaint.DrawFocusRectangle(e.Graphics,
-                Rectangle.FromLTRB(e.Bounds.Left, e.Bounds.Top, cols.End, e.Bounds.Bottom), foreground, background);
+            ControlPaint.DrawFocusRectangle(e.Graphics, rowBounds, foreground, background);
         }
     }
 
     /// @brief 通知行の内容をテーマと列幅に合わせて描画する。
-    private static Bitmap DrawInboxIcon(bool folder)
+    private static void DrawInboxIcon(Graphics graphics, Rectangle bounds, bool folder)
     {
-        var bitmap = new Bitmap(16, 16, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        using var graphics = Graphics.FromImage(bitmap);
+        var state = graphics.Save();
+        try
+        {
+            graphics.TranslateTransform(bounds.Left, bounds.Top);
+            graphics.ScaleTransform(bounds.Width / 16f, bounds.Height / 16f);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            DrawInboxIconShape(graphics, folder);
+        }
+        finally { graphics.Restore(state); }
+    }
+
+    private static void DrawInboxIconShape(Graphics graphics, bool folder)
+    {
         Color outline = SystemInformation.HighContrast ? SystemColors.WindowText :
             folder ? Color.FromArgb(138, 92, 26) : Color.FromArgb(65, 110, 164);
         using var pen = new Pen(outline);
@@ -137,7 +146,6 @@ internal sealed partial class MainWindow
             graphics.DrawLine(pen, 5, 8, 11, 8);
             graphics.DrawLine(pen, 5, 11, 11, 11);
         }
-        return bitmap;
     }
 
     /// @brief 通知行と同じ列境界を使うヘッダー。

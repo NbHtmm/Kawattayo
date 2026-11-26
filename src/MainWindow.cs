@@ -320,7 +320,6 @@ internal sealed partial class MainWindow : Form
         {
             __pollTimer.Dispose();
             __ageTimer.Dispose();
-            __inboxIcons.Dispose();
             __management?.Dispose();
             __tray.Dispose();
             __trayMenu.Dispose();

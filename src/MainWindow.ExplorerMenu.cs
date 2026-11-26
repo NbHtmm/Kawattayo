@@ -119,7 +119,8 @@ internal sealed partial class MainWindow
         public event Action<TreeNode, Point>? ShellMenuRequested; //!< 対象行に対する利用者の操作を親画面に通知する。
         public event Action<TreeNode>? DefaultOpenRequested; //!< 対象行に対する利用者の操作を親画面に通知する。
         public event Action<TreeNode>? ReadRequested; //!< 対象行に対する利用者の操作を親画面に通知する。
-        private TreeNode? __pressedRead; //!< 確認済みボタンを押した位置の行。
+        private enum RowAction { None, Read, Toggle }
+        private (TreeNode Node, RowAction Action)? __pressedAction; //!< 押下時の行と操作。
 
         // 列は画面内に収めるため、長いファイル名で横スクロールを起こさない。
         protected override CreateParams CreateParams
@@ -154,35 +155,14 @@ internal sealed partial class MainWindow
         /// @brief キーボードや Windows メッセージを対象行の操作に変換する。
         protected override void WndProc(ref Message message)
         {
-            // 左ボタンの押下・解放・ダブルクリックでは、まず行内の既読ボタンを判定する。
+            // 独自のボタン入力を先に処理し、同じ操作を Windows 側で重ねて扱わない。
             if (message.Msg is 0x201 or 0x202 or 0x203)
             {
                 int p = unchecked((int)message.LParam);
                 var pt = new Point((short)p, (short)(p >> 16));
-                var cols = LayoutColumns;
-                var node = GetNodeAt(pt);
-                bool onRead = node?.Tag is InboxRow && pt.X >= cols.Action && pt.X < cols.End;
-                // 押下時の行を記憶し、別の行で離した場合の誤操作を防ぐ。
-                if (message.Msg == 0x201)
+                if (HandleRowAction(message.Msg, pt))
                 {
-                    __pressedRead = onRead ? node : null;
-                }
-
-                // 既読ボタンから始まった操作は、ボタンを離した時点で確定する。
-                if (message.Msg == 0x202 && __pressedRead is { } pressed)
-                {
-                    __pressedRead = null;
-                    // 押した行の既読ボタン上で離した場合だけ、その行を既読にする。
-                    if (onRead && pressed == node)
-                    {
-                        ReadRequested?.Invoke(pressed);
-                    }
-
-                    return;
-                }
-                // 既読ボタン上の入力をツリーの通常のクリック処理に渡さない。
-                if (onRead)
-                {
+                    message.Result = 0;
                     return;
                 }
             }
@@ -221,18 +201,73 @@ internal sealed partial class MainWindow
             if (message.Msg == leftDoubleClick)
             {
                 int packed = unchecked((int)message.LParam);
-                var hit = HitTest((short)(packed & 0xffff), (short)(packed >> 16));
-                // ラベル・アイコンのダブルクリックは開く。展開ボタンと空白には干渉しない。
-                // 行の対象部分に当たった場合だけ開き、展開ボタンなどの操作と区別する。
-                if (hit.Node is { } node &&
-                    (hit.Location & (TreeViewHitTestLocations.Label | TreeViewHitTestLocations.Image | TreeViewHitTestLocations.RightOfLabel)) != 0)
+                var point = new Point((short)packed, (short)(packed >> 16));
+                if (GetInboxRowAt(point) is { } node)
                 {
-                    DefaultOpenRequested?.Invoke(node);
+                    var row = LayoutRow(node, node.Bounds);
+                    if (row.Icon.Contains(point) || row.Label.Contains(point))
+                    {
+                        DefaultOpenRequested?.Invoke(node);
+                    }
+
+                    // 他列をクリックしても、ネイティブ動作で意図せず開閉しない。
                     message.Result = 0;
                     return;
                 }
             }
             base.WndProc(ref message);
+        }
+
+        private TreeNode? GetInboxRowAt(Point point) =>
+            ClientRectangle.Contains(point) && GetNodeAt(point) is { Tag: InboxRow } node &&
+            point.Y >= node.Bounds.Top && point.Y < node.Bounds.Bottom ? node : null;
+
+        private bool HandleRowAction(int message, Point point)
+        {
+            const int down = 0x201, up = 0x202;
+            var node = GetInboxRowAt(point);
+            var action = RowAction.None;
+            if (node is not null)
+            {
+                var row = LayoutRow(node, node.Bounds);
+                action = row.Read.Contains(point) ? RowAction.Read :
+                    row.Toggle.Contains(point) ? RowAction.Toggle : RowAction.None;
+            }
+
+            if (message == down && node is not null && action != RowAction.None)
+            {
+                __pressedAction = (node, action);
+                Capture = true;
+                return true;
+            }
+
+            if (message == up && __pressedAction is { } pressed)
+            {
+                __pressedAction = null;
+                Capture = false;
+                if (node == pressed.Node && action == pressed.Action)
+                {
+                    if (action == RowAction.Read)
+                    {
+                        ReadRequested?.Invoke(pressed.Node);
+                    }
+                    else
+                    {
+                        if (pressed.Node.IsExpanded) pressed.Node.Collapse(ignoreChildren: true);
+                        else pressed.Node.Expand();
+                        Invalidate();
+                    }
+                }
+                return true;
+            }
+
+            return action != RowAction.None;
+        }
+
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            base.OnMouseCaptureChanged(e);
+            if (!Capture) __pressedAction = null;
         }
     }
 }
