@@ -8,7 +8,8 @@
       <DataCollector friendlyName="XPlat Code Coverage">
         <Configuration>
           <Format>cobertura,opencover</Format>
-          <Include>[Kawattayo.Core]*,[Kawattayo.Windows]*,[Kawattayo-cli]*,[Kawattayo.Avalonia]*</Include>
+          <!-- Coverlet does not accept a literal hyphen in an assembly filter. -->
+          <Include>[Kawattayo.Core]*,[Kawattayo.Windows]*,[Kawattayo*cli]*,[Kawattayo.Avalonia]*</Include>
         </Configuration>
       </DataCollector>
     </DataCollectors>

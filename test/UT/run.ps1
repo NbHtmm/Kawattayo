@@ -36,6 +36,15 @@ try {
         $counters = $trx.SelectSingleNode("//*[local-name()='Counters']")
         if (!$counters -or [int]$counters.executed -lt 1) { throw 'No unit tests executed.' }
         if (!(Get-ChildItem -LiteralPath $out -Filter 'coverage.cobertura.xml' -Recurse)) { throw 'Coverage report missing.' }
+        # VSTest also makes a nested TRX attachment copy. Inspect the direct collector output only.
+        $coverageReports = @(Get-ChildItem -LiteralPath $out -Directory |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -File -Filter 'coverage.opencover.xml' })
+        if ($coverageReports.Count -ne 1) { throw 'Expected one OpenCover report.' }
+        [xml]$coverage = Get-Content -LiteralPath $coverageReports[0].FullName -Raw
+        $modules = @($coverage.CoverageSession.Modules.Module | ForEach-Object { $_.ModuleName })
+        $expectedModules = @('Kawattayo.Core', 'Kawattayo.Windows', 'Kawattayo-cli', 'Kawattayo.Avalonia')
+        $missing = @($expectedModules | Where-Object { $_ -cnotin $modules })
+        if ($missing.Count -gt 0) { throw ('Coverage modules missing: ' + ($missing -join ', ')) }
     }
     exit $status
 } finally {
