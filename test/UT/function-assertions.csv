@@ -108,3 +108,7 @@ cli/Program.cs,"Program.Options.Options(string[] args, string[] fields, string[]
 "src/Windows/Persistence/InventoryDb.WatchCache.cs","ShareFileWatch.CachedTarget.MatchesRegistration(WatchItem item)","InventoryDbWatchCacheTests","MatchesRegistration_IgnoresPathCaseButNotKindOrDifferentPath","1"
 "src/Windows/Persistence/InventoryDb.WatchCache.cs","ShareFileWatch.CachedTarget.Matches(WatchItem item)","InventoryDbWatchCacheTests","Matches_IgnoresVolatileProgressButDetectsScopeAndPendingChanges","1"
 "src/Windows/Persistence/InventoryDb.WatchCache.cs","ShareFileWatch.CachedTarget.SamePending(Dictionary<string, FileChange>? first, Dictionary<string, FileChange> second)","InventoryDbWatchCacheTests","SamePending_RequiresExactContentAndCountButNotInsertionOrder","1"
+"src/Windows/Persistence/MonitoringCache.cs","ShareFileWatch.MonitoringCache.IsRelativeEntry(string path)","MonitoringCacheTests","IsRelativeEntry_AllowsOnlyUnambiguousRelativeFileNames","14"
+"src/Windows/Persistence/MonitoringCache.cs","ShareFileWatch.MonitoringCache.ValidateObservations(WatchItem item)","MonitoringCacheTests","ValidateObservations_AcceptsFolderMarkerAndIndependentPendingFile","1"
+"src/Windows/Persistence/MonitoringCache.cs","ShareFileWatch.MonitoringCache.ValidateObservations(WatchItem item)","MonitoringCacheTests","ValidateObservations_RejectsFolderMarkerForAFileTarget","1"
+"src/Windows/Persistence/MonitoringCache.cs","ShareFileWatch.MonitoringCache.ValidateObservations(WatchItem item)","MonitoringCacheTests","ValidateObservations_RejectsEveryIndependentInvalidField","1"

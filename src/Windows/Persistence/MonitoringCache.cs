@@ -33,7 +33,7 @@ internal sealed class MonitoringCache(string database)
         db.Exec("COMMIT");
     }
 
-    private static void ValidateObservations(WatchItem item)
+    internal static void ValidateObservations(WatchItem item)
     {
         if (item.Unread < 0 || item.Inventory?.Keys.Any(key => !IsRelativeEntry(key)) == true ||
             item.PendingFiles.Any(entry => (!item.IsFolder || entry.Key != ".") && !IsRelativeEntry(entry.Key)))
@@ -41,7 +41,7 @@ internal sealed class MonitoringCache(string database)
     }
 
     // 比較 DB の値も、シェルを開く前に監視先の相対パスであることを確認する。
-    private static bool IsRelativeEntry(string path) => !Path.IsPathRooted(path) &&
+    internal static bool IsRelativeEntry(string path) => !Path.IsPathRooted(path) &&
         path.Split('\\', '/').All(part => part.Length > 0 && part is not "." and not ".." &&
             part.IndexOfAny(Path.GetInvalidFileNameChars()) < 0);
 
