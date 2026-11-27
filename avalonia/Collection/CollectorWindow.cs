@@ -23,6 +23,10 @@ internal sealed class CollectorWindow : Window
     internal CollectorWindow(Checkpoints checkpoints, Action showMonitor)
     {
         this.checkpoints = checkpoints;
+        // Placeholders disappear after input; keep the fields named for assistive technology.
+        Avalonia.Automation.AutomationProperties.SetName(name, "チェックポイント名");
+        Avalonia.Automation.AutomationProperties.SetName(root, "比較対象フォルダ");
+        Avalonia.Automation.AutomationProperties.SetName(exclusions, "除外パターン");
         saved.ItemTemplate = new FuncDataTemplate<CheckpointInfo>((item, _) => item is null ? null : new TextBlock { Text = CheckpointLabels.Describe(item) });
         results.ItemTemplate = new FuncDataTemplate<CheckpointDifference>((item, _) => item is null ? null : new TextBlock { Text = CheckpointLabels.Describe(item) });
         Title = "かわったよ · 差分収集";

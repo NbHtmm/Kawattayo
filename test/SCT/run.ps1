@@ -111,7 +111,7 @@ try {
         $desktopReady = $true
     } catch {
         $message = $_.Exception.Message
-        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-006','SCT-GUI-008','SCT-GUI-009','SCT-GUI-010','SCT-GUI-011','SCT-GUI-012','SCT-GUI-013','SCT-GUI-014','SCT-GUI-016','SCT-GUI-017','SCT-GUI-018','SCT-GUI-019','SCT-GUI-020','SCT-GUI-021','SCT-GUI-022','SCT-PERSIST-001','SCT-PERSIST-002','SCT-PERSIST-003','SCT-PERSIST-004','SCT-HOOK-001','SCT-HOOK-002','SCT-HOOK-003') {
+        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-006','SCT-GUI-008','SCT-GUI-009','SCT-GUI-010','SCT-GUI-011','SCT-GUI-012','SCT-GUI-013','SCT-GUI-014','SCT-GUI-016','SCT-GUI-017','SCT-GUI-018','SCT-GUI-019','SCT-GUI-020','SCT-GUI-021','SCT-GUI-022','SCT-GUI-023','SCT-PERSIST-001','SCT-PERSIST-002','SCT-PERSIST-003','SCT-PERSIST-004','SCT-HOOK-001','SCT-HOOK-002','SCT-HOOK-003') {
             $results.Add(@{ id = $id; outcome = 'BLOCKED'; error = $message })
             Write-Host "BLOCKED ${id}: $message"
         }
@@ -165,6 +165,7 @@ try {
         Invoke-Case 'SCT-GUI-019' { Invoke-SctTargetCount $package (Join-Path $out 'SCT-GUI-019') }
         Invoke-Case 'SCT-GUI-020' { Invoke-SctRecursionOverride $package (Join-Path $out 'SCT-GUI-020') }
         Invoke-Case 'SCT-GUI-021' { Invoke-SctNestedInbox $package (Join-Path $out 'SCT-GUI-021') }
+        Invoke-Case 'SCT-GUI-023' { Invoke-SctCollectorCreation $package (Join-Path $out 'SCT-GUI-023') }
         Invoke-Case 'SCT-GUI-022' { Invoke-SctClearDeleted $package (Join-Path $out 'SCT-GUI-022') }
         Invoke-Case 'SCT-HOOK-001' { Invoke-SctUpdateHook $package (Join-Path $out 'SCT-HOOK-001') }
         Invoke-Case 'SCT-HOOK-002' { Invoke-SctUpdateHook $package (Join-Path $out 'SCT-HOOK-002') -Negative }
@@ -257,6 +258,11 @@ try {
             if ($result.id -eq 'SCT-GUI-021') {
                 $result.testCode = 'test/SCT/NestedInbox.ps1'
                 $log = 'SCT-GUI-021/observations.txt'
+                if (Test-Path -LiteralPath (Join-Path $out $log)) { $result.evidence = @($log) }
+            }
+            if ($result.id -eq 'SCT-GUI-023') {
+                $result.testCode = 'test/SCT/CollectorScenario.ps1'
+                $log = 'SCT-GUI-023/observations.txt'
                 if (Test-Path -LiteralPath (Join-Path $out $log)) { $result.evidence = @($log) }
             }
             if ($result.id -eq 'SCT-GUI-022') {
