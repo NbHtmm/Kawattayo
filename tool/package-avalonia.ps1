@@ -13,9 +13,11 @@ try {
     $version = ([xml](Get-Content -LiteralPath $project -Raw)).SelectSingleNode("/Project/PropertyGroup/Version").InnerText
     if (!$PublishDirectory) {
         $PublishDirectory = Join-Path $root ('build/avalonia-publish-' + [Guid]::NewGuid().ToString('N'))
-        dotnet publish avalonia/Kawattayo.Avalonia.csproj -c Release -r win-x64 -p:PublishAot=true -p:OptimizationPreference=Size -p:DebugType=None -p:DebugSymbols=false -p:RestoreLockedMode=true --source https://api.nuget.org/v3/index.json -o $PublishDirectory
+        dotnet publish avalonia/Kawattayo.Avalonia.csproj -c Release -r win-x64 -p:PublishAot=true -p:OptimizationPreference=Size -p:DebugType=None -p:DebugSymbols=false -p:KawattayoLocalRestore=true --source https://api.nuget.org/v3/index.json -o $PublishDirectory
         if ($LASTEXITCODE) { throw 'Native AOT publish failed.' }
     }
+    # ZipFile resolves paths against the process directory, not PowerShell location.
+    $PublishDirectory = (Resolve-Path -LiteralPath $PublishDirectory).ProviderPath
     if (!$AssetsFile) { $AssetsFile = 'avalonia/obj/project.assets.json' }
     $assets = Get-Content -LiteralPath $AssetsFile -Raw -Encoding UTF8 | ConvertFrom-Json
     function Find-PackageFile([string]$id, [string]$name, [string]$version = '') {

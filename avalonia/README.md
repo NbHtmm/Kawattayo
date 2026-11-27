@@ -28,6 +28,7 @@ Avalonia の画面・ビルド設定は `avalonia/`、
 
 開発側では Windows x64、.NET 10 SDK、Visual Studio の C++ デスクトップ開発ツールが必要です。
 依存パッケージは NuGet.org から取得します。利用側に開発ツールは不要です。
+ビルドと配布 ZIP 作成では、インストール済み SDK が要求する Native AOT パックを復元します。SDK ごとのロックは `avalonia/obj/packages.sdk.lock.json` に保存し、Git 管理の `packages.lock.json` は変更しません。
 
 ```powershell
 .\tool\build.bat
