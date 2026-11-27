@@ -28,3 +28,9 @@
 2. Aに `Fixture is ready for Writer` が出たら45秒以内に、Bで `pwsh -File test/SCT/Run-SmbLifecycle.ps1 -Role Writer -FixtureRoot "\\SERVER\SHARE\Kawattayo-Sct" -RunId "<同じID>" -DedicatedShare`。2台はそれぞれ固有のコンピューター名を使用する。
 3. AがBの排他書き込み中に監視を1回終え、Bが書き込みを完了できることを確認する。続いてBがファイルを改名、元の名前に戻す、削除を行い、Aで「更新」「消失」「出現」「消失」が順に各1件だけ検知されることを確認する。結果はAの `build/SMB-002-*/environment-result.json` に別保存する。A・Bのコンソールログも残す。
 4. `-LocalRehearsal` は同一端末のリポジトリ内 `build/` 配下の使い捨てフォルダで手順を予行するモード。成功しても `REHEARSAL_PASS` で、実SMBの合格には含めない。試験用の共有側フォルダは自動で削除しない。
+
+## SCT-PERF-001 の計測スクリプト
+
+専用の対話型Windowsセッションでアプリを閉じ、件数・上限を先に決めてから `pwsh -File test/SCT/Run-PerfSession.ps1 -Package "<配布ZIP>" -Files 16000 -MaxUiMilliseconds 2000 -DedicatedSession` を実行する。100件ずつに分けた作業用のローカルフォルダと設定を毎回新規作成する。監視中と表示されたところで設定表示と中断を別々に測定し、再開後の総件数（指定件数＋1）と未読のファイル名まで検証する。測定に必要な監視中の状態が観測できなければ `BLOCKED` とし、平常時の応答時間で代用しない。
+
+時刻・件数・上限・測定値・ZIPのSHA-256は `build/PERF-001-*/environment-result.json` に保存する。上限は使用先で合意した値を指定し、別の端末やネットワークの性能をこの結果から保証しない。通常の設定や監視対象は変更しない。著しく少ない件数で手順を予行するなら `-DedicatedSession` の代わりに `-LocalRehearsal` を選ぶ。この結果は実環境の合格に含めない。
