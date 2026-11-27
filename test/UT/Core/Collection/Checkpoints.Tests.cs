@@ -41,6 +41,52 @@ public sealed class CheckpointsTests
         Require(repository.List().Length == 1, "既存の基準を変更しない");
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_RejectsEmptyNamesAndDoesNotPersist(string name)
+    {
+        var repository = new MemoryRepository();
+        var service = new Checkpoints(repository, new ScriptedScanner(), new CopySpy(), TimeProvider.System);
+        Assert.Throws<ArgumentException>(() => service.Create(name, Path.GetFullPath("source"), false, "", TestContext.Current.CancellationToken));
+        Assert.Empty(repository.List());
+    }
+
+    [Fact]
+    public void Create_StoresTrimmedNameAndFrozenScanPolicy()
+    {
+        var repository = new MemoryRepository();
+        var clock = new FixedClock(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var scanner = new ScriptedScanner();
+        var service = new Checkpoints(repository, scanner, new CopySpy(), clock);
+        var source = Path.GetFullPath("source") + Path.DirectorySeparatorChar;
+        var point = service.Create("  基準  ", source, false, "~$*\n*.tmp\n*.TMP", TestContext.Current.CancellationToken);
+        Assert.Equal("基準", point.Name);
+        Assert.Equal(Path.TrimEndingDirectorySeparator(source), point.Root);
+        Assert.False(point.Recursive);
+        Assert.Equal(new[] { "~$*", "*.tmp" }, point.Exclusions);
+        Assert.Equal(clock.GetUtcNow(), point.At);
+        Assert.Equal(point, Assert.Single(service.List()));
+        Assert.Empty(service.Compare(point.Id, TestContext.Current.CancellationToken).Changes);
+    }
+
+    [Fact]
+    public void Compare_RejectsCancellationBeforeReturningChanges()
+    {
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner();
+        var service = new Checkpoints(repository, scanner, new CopySpy(), TimeProvider.System);
+        var point = service.Create("baseline", Path.GetFullPath("source"), true, "", TestContext.Current.CancellationToken);
+        scanner.View.Files["added.txt"] = new(1, 1, 1);
+        var stop = new CancellationToken(canceled: true);
+        Assert.Throws<OperationCanceledException>(() => service.Compare(point.Id, stop));
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
     private static void Require(bool value, string message)
     {
         if (!value) throw new InvalidOperationException(message);
