@@ -82,6 +82,66 @@ public sealed class CheckpointsTests
         Assert.Throws<OperationCanceledException>(() => service.Compare(point.Id, stop));
     }
 
+
+    [Fact]
+    public void Compare_RootFailureReportsUnconfirmedAndDoesNotReplaceTheBaseline()
+    {
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner();
+        var service = new Checkpoints(repository, scanner, new CopySpy(), TimeProvider.System);
+        var stop = TestContext.Current.CancellationToken;
+        var original = new Fingerprint(1, 1, 9);
+        scanner.View.Files["keep.txt"] = original;
+        scanner.View.Files["gone.txt"] = original;
+        var point = service.Create("baseline", Path.GetFullPath("fixture"), true, "", stop);
+
+        scanner.View = new(new(StringComparer.OrdinalIgnoreCase), new() { [""] = "temporarily unavailable" });
+        Assert.Equal(new CheckpointDifference("", DifferenceKind.Unconfirmed, null, "temporarily unavailable"),
+            Assert.Single(service.Compare(point.Id, stop).Changes));
+
+        scanner.View = new(new(StringComparer.OrdinalIgnoreCase) { ["keep.txt"] = original }, new());
+        Assert.Equal(new CheckpointDifference("gone.txt", DifferenceKind.Deleted, null),
+            Assert.Single(service.Compare(point.Id, stop).Changes));
+    }
+
+    [Fact]
+    public void Compare_UnconfirmedFolderDoesNotHideDeletionFromSimilarlyNamedSibling()
+    {
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner();
+        var service = new Checkpoints(repository, scanner, new CopySpy(), TimeProvider.System);
+        var stop = TestContext.Current.CancellationToken;
+        var hidden = Path.Combine("logs", "nested", "hidden.txt");
+        var sibling = Path.Combine("logs-old", "deleted.txt");
+        scanner.View.Files[hidden] = new(1, 1, 9);
+        scanner.View.Files[sibling] = new(1, 1, 9);
+        var point = service.Create("baseline", Path.GetFullPath("fixture"), true, "", stop);
+
+        scanner.View = new(new(StringComparer.OrdinalIgnoreCase), new(StringComparer.OrdinalIgnoreCase) { ["LOGS"] = "unavailable" });
+        var differences = service.Compare(point.Id, stop).Changes;
+        Assert.Collection(differences,
+            x => Assert.Equal(new CheckpointDifference("LOGS", DifferenceKind.Unconfirmed, null, "unavailable"), x),
+            x => Assert.Equal(new CheckpointDifference(sibling, DifferenceKind.Deleted, null), x));
+    }
+
+    [Fact]
+    public void Collect_PassesSelectedFileFingerprintRootAndCancellationToSaver()
+    {
+        var downloads = new CopySpy();
+        var service = new Checkpoints(new MemoryRepository(), new ScriptedScanner(), downloads, TimeProvider.System);
+        var stop = TestContext.Current.CancellationToken;
+        var source = Path.GetFullPath("source");
+        var point = new CheckpointInfo("id", "baseline", source, true, [], DateTimeOffset.UnixEpoch);
+        var expected = new Fingerprint(4, 5, 6);
+        var relative = Path.Combine("sub", "測定 A.txt");
+        var target = Path.GetFullPath("output");
+        service.Collect(point, [new(relative, DifferenceKind.Updated, expected), new("removed", DifferenceKind.Deleted, null)], target, stop);
+
+        Assert.Equal(new DownloadRequest(Path.Combine(source, relative), relative, expected, source), Assert.Single(downloads.Requests));
+        Assert.Equal(target, downloads.Output);
+        Assert.Equal(stop, downloads.Stop);
+    }
+
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
@@ -117,8 +177,14 @@ public sealed class CheckpointsTests
     private sealed class CopySpy : ICheckpointDownloads
     {
         internal string[] Paths = [];
+        internal DownloadRequest[] Requests = [];
+        internal string? Output;
+        internal CancellationToken Stop;
         public DownloadResult[] Save(string output, IReadOnlyList<DownloadRequest> requests, CancellationToken stop)
         {
+            Requests = requests.ToArray();
+            Output = output;
+            Stop = stop;
             Paths = requests.Select(x => x.Relative).ToArray();
             return [];
         }
