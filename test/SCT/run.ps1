@@ -121,11 +121,13 @@ try {
     }
 
     $volume = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($out))
-    if ($volume.DriveFormat -eq 'NTFS') {
-        Invoke-Case 'SCT-CLI-012' { Invoke-CheckpointScenario -CaseId 'SCT-CLI-012' }
-    } else {
-        $results.Add(@{ id = 'SCT-CLI-012'; outcome = 'BLOCKED'; error = 'The Zone.Identifier fixture requires NTFS.' })
-        Write-Host 'BLOCKED SCT-CLI-012: The Zone.Identifier fixture requires NTFS.'
+    foreach ($ntfsCase in 'SCT-CLI-012','SCT-CLI-014') {
+        if ($volume.DriveFormat -eq 'NTFS') {
+            Invoke-Case $ntfsCase { Invoke-CheckpointScenario -CaseId $ntfsCase }
+        } else {
+            $results.Add(@{ id = $ntfsCase; outcome = 'BLOCKED'; error = 'This fixture requires NTFS.' })
+            Write-Host "BLOCKED ${ntfsCase}: This fixture requires NTFS."
+        }
     }
 
     if ($desktopReady) {
@@ -190,6 +192,7 @@ try {
             if ($caseId -eq 'SCT-CLI-011') { $result.testCode = 'test/SCT/Steps/CheckpointVolumeSteps.cs' }
             if ($caseId -eq 'SCT-CLI-012') { $result.testCode = 'test/SCT/Steps/CheckpointZoneSteps.cs' }
             if ($caseId -eq 'SCT-CLI-013') { $result.testCode = 'test/SCT/Steps/CheckpointLockedSourceSteps.cs' }
+            if ($caseId -eq 'SCT-CLI-014') { $result.testCode = 'test/SCT/Steps/CheckpointPathCaseSteps.cs' }
             $result.evidence = @('sct.trx', 'cucumber.ndjson' |
                 ForEach-Object { "$caseId/$_" } | Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
         } elseif ($result.id -ne 'SCT-SETUP') {
