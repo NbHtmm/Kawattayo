@@ -9,7 +9,7 @@ goto :usage
 :start
 pushd "%~dp0.." || exit /b 1
 if /i "%~1"=="integration" goto :integration
-dotnet run --project tests/Core.Tests/Kawattayo.Core.Tests.csproj -c Release -p:UseSharedCompilation=false
+call test\run_ut.bat
 if errorlevel 1 goto :failed
 if /i "%~1"=="unit" goto :success
 

@@ -1,8 +1,10 @@
 using ShareFileWatch;
+using Xunit;
 
-internal static class MonitoringCoreTests
+public sealed class MonitoringReducerTests
 {
-    internal static void Run()
+    [Fact]
+    public void Apply_ReportsUpdatesAndReappearanceButNotDuplicateOrLostFiles()
     {
         var time = DateTimeOffset.UtcNow;
         string path = Path.GetFullPath("sample.txt");

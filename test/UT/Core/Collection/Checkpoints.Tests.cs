@@ -1,9 +1,12 @@
 using ShareFileWatch;
+using Xunit;
 
-internal static class CheckpointCoreTests
+public sealed class CheckpointsTests
 {
-    internal static void Run()
+    [Fact]
+    public void CompareAndCollect_PreserveScopeAndIgnoreUnreadableSubtrees()
     {
+        var token = TestContext.Current.CancellationToken;
         var repository = new MemoryRepository();
         var scanner = new ScriptedScanner();
         var downloads = new CopySpy();
@@ -15,26 +18,26 @@ internal static class CheckpointCoreTests
         scanner.View.Files["modified.txt"] = new(100, 20, 500);
         scanner.View.Files["created-stamp-only.txt"] = new(100, 20, 500);
         scanner.View.Files[hidden] = new(200, 10, 300);
-        var point = service.Create("試験前", source, true, "~$*", default);
+        var point = service.Create("試験前", source, true, "~$*", token);
 
         scanner.View = new(new(StringComparer.OrdinalIgnoreCase)
         {
             ["added.txt"] = new(200, 10, 300), ["modified.txt"] = new(300, 20, 700),
             ["created-stamp-only.txt"] = new(100, 50, 500)
         }, new(StringComparer.OrdinalIgnoreCase) { ["locked"] = "アクセス拒否" });
-        var (_, differences) = service.Compare(point.Id, default);
+        var (_, differences) = service.Compare(point.Id, token);
         var types = differences.ToDictionary(x => x.Relative, x => x.Kind);
         Require(types.Count == 4 && types["locked"] == DifferenceKind.Unconfirmed &&
             types["deleted.txt"] == DifferenceKind.Deleted && types["modified.txt"] == DifferenceKind.Updated &&
             types["added.txt"] == DifferenceKind.Added && !types.ContainsKey(hidden), "部分的な照会失敗と、同じサイズ・更新時刻の判定");
         Require(repository.List().Single().Exclusions.SequenceEqual(new[] { "~$*" }), "取得時の除外を維持");
 
-        service.Collect(point, differences, destination, default);
+        service.Collect(point, differences, destination, token);
         Require(downloads.Paths.SequenceEqual(new[] { "added.txt", "modified.txt" }), "保存できる差分だけを渡す");
-        Reject(() => service.Collect(point, differences, source, default), "監視元には出力しない");
+        Reject(() => service.Collect(point, differences, source, token), "監視元には出力しない");
         Reject(() => service.Collect(point, [new(Path.Combine("..", "outside.txt"), DifferenceKind.Added, new(0, 0, 1))],
-            destination, default), "相対パスが外へ出ない");
-        Reject(() => service.Create("失敗", source, true, "", default), "不完全な一覧で基準を確定しない");
+            destination, token), "相対パスが外へ出ない");
+        Reject(() => service.Create("失敗", source, true, "", token), "不完全な一覧で基準を確定しない");
         Require(repository.List().Length == 1, "既存の基準を変更しない");
     }
 
