@@ -178,6 +178,39 @@ public sealed class ProgramTests
         Assert.Equal(unconfirmed ? 1 : 0, json.RootElement.GetProperty("unconfirmed").GetArrayLength());
     }
 
+
+    [Fact]
+    public void Run_CollectionCancellationDoesNotEmitAPartialSuccessResponse()
+    {
+        using var stop = new CancellationTokenSource();
+        var fixture = new CliFixture { AfterCopy = () => stop.Cancel() };
+        var point = Point("aabb", "baseline");
+        fixture.Save(point, new(), stop.Token);
+        fixture.View.Files["ready.txt"] = new(1, 2, 3);
+        using var text = new StringWriter();
+        using var bytes = new MemoryStream();
+        Assert.Throws<OperationCanceledException>(() => Program.Run(["collect", "--checkpoint", point.Id,
+            "--output", Path.GetFullPath("export"), "--json"], fixture.Points, stop.Token, text, () => bytes));
+
+        Assert.Empty(text.ToString());
+        Assert.Empty(bytes.ToArray());
+        Assert.Equal("ready.txt", Assert.Single(fixture.CopyRequests).Relative);
+    }
+
+    [Theory]
+    [InlineData("diff")]
+    [InlineData("collect")]
+    public void Run_MissingRequiredOptionsDoesNotScanOrProduceOutput(string verb)
+    {
+        var fixture = new CliFixture();
+        var token = TestContext.Current.CancellationToken;
+        using var text = new StringWriter();
+        Assert.Throws<ArgumentException>(() => Program.Run([verb, "--json"], fixture.Points, token, text, UnexpectedJson));
+        Assert.Equal(0, fixture.ScanCalls);
+        Assert.Empty(fixture.CopyRequests);
+        Assert.Empty(text.ToString());
+    }
+
     private static Stream UnexpectedJson() => throw new InvalidOperationException("Text commands must not open JSON output.");
 
     private static CheckpointInfo Point(string id, string name) =>
@@ -188,6 +221,8 @@ public sealed class ProgramTests
         private readonly Dictionary<string, (CheckpointInfo Info, Dictionary<string, Fingerprint> Files)> saved = [];
         public CheckpointScan View { get; } = new(new(StringComparer.OrdinalIgnoreCase), new(StringComparer.OrdinalIgnoreCase));
         internal bool CopySucceeds { get; init; } = true;
+        internal Action? AfterCopy { get; init; }
+        internal int ScanCalls { get; private set; }
         internal DownloadRequest[] CopyRequests { get; private set; } = [];
         internal Checkpoints Points => new(this, this, this, TimeProvider.System);
 
@@ -195,10 +230,15 @@ public sealed class ProgramTests
         public (CheckpointInfo Info, Dictionary<string, Fingerprint> Files) Read(string id, CancellationToken stop) => saved[id];
         public void Save(CheckpointInfo info, Dictionary<string, Fingerprint> files, CancellationToken stop) =>
             saved.Add(info.Id, (info, new(files, StringComparer.OrdinalIgnoreCase)));
-        public CheckpointScan Scan(CheckpointInfo scope, CancellationToken stop) => View;
+        public CheckpointScan Scan(CheckpointInfo scope, CancellationToken stop)
+        {
+            ScanCalls++;
+            return View;
+        }
         public DownloadResult[] Save(string output, IReadOnlyList<DownloadRequest> requests, CancellationToken stop)
         {
             CopyRequests = requests.ToArray();
+            AfterCopy?.Invoke();
             return requests.Select(x => new DownloadResult(x.Source,
                 CopySucceeds ? Path.Combine(output, x.Relative) : null, CopySucceeds ? null : "not copied")).ToArray();
         }
