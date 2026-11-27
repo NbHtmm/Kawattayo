@@ -35,8 +35,8 @@ internal static class InventoryTests
         {
             string[] allowedSettings = ["Pinned", "LowServerLoad", "WatchDirectoryTime", "NotifyDeleted", "ExcludedFilePatterns",
                 "TextSizePoints", "RenotifyUnread", "ReadOnFileOpen", "RecursiveFolders", "DarkMode", "Version", "PollSeconds",
-                "Paused", "KeepInTray", "Items"];
-            string[] allowedRegistration = ["Id", "Path", "DisplayName", "IsFolder", "RecursiveOverride", "Recursive"];
+                "Paused", "KeepInTray", "Items", "WaitForStable", "StableSeconds"];
+            string[] allowedRegistration = ["Id", "Path", "DisplayName", "IsFolder", "RecursiveOverride", "Recursive", "WaitForStableOverride"];
             Check(settings.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet().SetEquals(allowedSettings) &&
                 settings.RootElement.GetProperty("Items")[0].EnumerateObject().Select(p => p.Name).ToHashSet().SetEquals(allowedRegistration),
                 "JSON contains only preferences and explicitly registered targets");

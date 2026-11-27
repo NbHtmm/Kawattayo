@@ -46,11 +46,25 @@ internal sealed partial class DesktopWindow
             Option("サーバー負荷を抑える（変更通知を優先）", __state.LowServerLoad, v => __state.LowServerLoad = v, true));
     }
 
-    private Control BuildNotificationOptions() => OptionGroup("通知と既読",
+    private Control BuildNotificationOptions()
+    {
+        var seconds = new NumericUpDown { Minimum = 1, Maximum = 300, Value = __state.StableSeconds, Width = 125 };
+        seconds.ValueChanged += (_, _) =>
+        {
+            if (seconds.Value is not { } value) return;
+            __state.StableSeconds = (int)value;
+            __monitor.UpdateSettings();
+        };
+        return OptionGroup("通知と既読",
         Option("通知領域に常駐", __state.KeepInTray, v => { __state.KeepInTray = v; __native.SetVisible(v); }),
         Option("ファイル・フォルダを開いたら既読にする", __state.ReadOnFileOpen, v => __state.ReadOnFileOpen = v),
         Option("未読のファイルも更新のたびに通知する", __state.RenotifyUnread, v => __state.RenotifyUnread = v),
-        Option("ファイルの削除（消失）を通知", __state.NotifyDeleted, v => __state.NotifyDeleted = v));
+        Option("ファイルの削除（消失）を通知", __state.NotifyDeleted, v => __state.NotifyDeleted = v),
+        Option("既定でファイルの更新が落ち着いてから通知する", __state.WaitForStable, v => __state.WaitForStable = v),
+        Bar(SettingLabel("安定待ち（秒）"), seconds),
+        new TextBlock { Text = "サイズと更新日時を巡回ごとに比較します。未読一覧にはすぐ表示されます。",
+            TextWrapping = TextWrapping.Wrap });
+    }
 
     private Control BuildDisplayOptions()
     {

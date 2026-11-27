@@ -98,6 +98,7 @@ internal sealed partial class DesktopWindow
                 await CapturePreviewScreens(fixture);
                 CheckpointTests.Run(fixture);
                 await ReconciliationTests.Run(fixture);
+                await ReconciliationTests.VerifySettled(fixture);
                 await HookTests.Run(fixture);
                 ShowCollector();
                 if (collector?.IsVisible != true || !IsVisible) throw new InvalidOperationException("Independent collector did not open.");

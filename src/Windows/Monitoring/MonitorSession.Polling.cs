@@ -61,7 +61,7 @@ internal sealed partial class MonitorSession
         var feeds = low ? PrepareFeeds() : null;
         bool Due(WatchItem i)
         {
-            if (!low || !__checks.TryGetValue(i.Id,out var c) || !c.Reliable || c.Revision != i.Revision) return true;
+            if (__settled.HasPending(i.Id) || !low || !__checks.TryGetValue(i.Id,out var c) || !c.Reliable || c.Revision != i.Revision) return true;
             var f = feeds!.GetValueOrDefault(i.Id);
             return ReconciliationDue(c) || f != c.Feed || f is null || !f.Available ||
                 f.Epoch != c.Epoch || f.Failed || f.Stamp(i.IsFolder, i.Path) != c.Stamp;
@@ -146,6 +146,9 @@ internal sealed partial class MonitorSession
             var baseline = item.Inventory;
             var priorExclusions = item.InventoryExclusions;
             var (stamp, paths) = CaptureFeedDelta(target, baseline);
+            // 低負荷モードでも通知待ちのファイルだけは、次の照会で再観測する。
+            if (paths is not null && __settled.HasPending(item.Id))
+                paths = paths.Concat(__settled.Paths(item.Id)).ToArray();
 #if KAWATTAYO_SMOKE
             ScanModeForTest?.Invoke(paths is null);
 #endif
@@ -230,7 +233,7 @@ internal sealed partial class MonitorSession
         __scanNeedsSave |= outcome.NeedsSave;
         __rowsPending = true;
         __inboxPending |= outcome.UnreadChanged;
-        __alertsPending.AddRange(outcome.Alerts);
+        DeliverAlerts(item!, result, outcome.Alerts);
         if (!__scanFlush.IsEnabled) __scanFlush.Start();
     }
 }

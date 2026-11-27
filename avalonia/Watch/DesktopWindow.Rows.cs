@@ -61,6 +61,13 @@ internal sealed partial class DesktopWindow
             if (row.Root)
             {
                 Add("表示名を変更", () => _ = Rename(target));
+                if (list == __targets)
+                {
+                    bool wait = target.WaitForStableOverride ?? __state.WaitForStable;
+                    Add($"安定待ち：{(wait ? "オン" : "オフ")} → 切り替え", () => __monitor.SetTargetNotificationWait(target, !wait));
+                    if (target.WaitForStableOverride is not null)
+                        Add("安定待ち：既定に戻す", () => __monitor.SetTargetNotificationWait(target, null));
+                }
                 Add("更新フック…", () => _ = ConfigureHook(target));
                 if (target.IsFolder)
                 {

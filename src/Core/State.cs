@@ -14,6 +14,7 @@ internal sealed class WatchItem
         get; set;
     } //!< フォルダ種別および配下を再帰監視する設定。
     public bool? RecursiveOverride { get; set; }
+    public bool? WaitForStableOverride { get; set; }
     public bool Recursive
     {
         get; set;
@@ -286,6 +287,8 @@ internal sealed class AppState
     public bool LowServerLoad { get; set; } = true;
     public bool WatchDirectoryTime { get; set; }
     public bool NotifyDeleted { get; set; }
+    public bool WaitForStable { get; set; } = true;
+    public int StableSeconds { get; set; } = 15;
     [JsonIgnore]
     public Queue<HistoryEntry> History { get; set; } = new(); //!< 保存する履歴の上限または検知順の履歴。
     public string[] ExcludedFilePatterns { get; set; } = ["~$*"]; //!< Office のロックファイルを既定で除外する。

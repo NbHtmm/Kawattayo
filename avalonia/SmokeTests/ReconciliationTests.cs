@@ -47,6 +47,40 @@ internal static class ReconciliationTests
         finally { await monitor.Close(); }
     }
 
+    internal static async Task VerifySettled(string fixture)
+    {
+        var dir = Directory.CreateDirectory(Path.Combine(fixture, "settled-profile")).FullName;
+        var root = Directory.CreateDirectory(Path.Combine(fixture, "settled-folder")).FullName;
+        var file = Path.Combine(root, "sample.txt");
+        File.WriteAllText(file, "first");
+        var clock = new StepClock();
+        var session = new MonitorSession(StateStore.BesideExecutable(dir), new ManualTimer(), new ManualTimer(), clock);
+        var alerts = new List<MonitorAlert>();
+        session.Alerts += current => alerts.AddRange(current);
+        session.State.LowServerLoad = true;
+        session.State.StableSeconds = 15;
+        session.UseSyntheticFeedForTest = true;
+        try
+        {
+            await session.Register([root]);
+            await session.Scan(automatic: true);
+            File.AppendAllText(file, " updated");
+            session.FeedEventForTest(file);
+            await session.Scan(automatic: true);
+            var item = session.State.Items.Single();
+            Require(item.Unread == 1 && session.WaitingNotifications == 1 && alerts.Count == 0,
+                "未読だけは更新検知時に表示");
+            clock.Advance(TimeSpan.FromSeconds(14));
+            await session.Scan(automatic: true);
+            Require(alerts.Count == 0, "低負荷モードでも安定時間より早く通知しない");
+            clock.Advance(TimeSpan.FromSeconds(1));
+            await session.Scan(automatic: true);
+            Require(alerts.Single().Path == file && session.WaitingNotifications == 0,
+                "新しい購読イベントなしでも期限後の照会で通知");
+        }
+        finally { await session.Close(); }
+    }
+
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);

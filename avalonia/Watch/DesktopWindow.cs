@@ -212,7 +212,8 @@ internal sealed partial class DesktopWindow : Window
             __failures.IsVisible = unavailable > 0;
             __failures.Content = $"監視失敗 {unavailable}件 ›";
         }
-        __status.Text = __monitor.Status;
+        __status.Text = __monitor.WaitingNotifications == 0 ? __monitor.Status :
+            $"{__monitor.Status} ｜ 安定待ち {__monitor.WaitingNotifications:N0}件";
         ToolTip.SetTip(__status, __status.Text);
     }
     private void ShowFromTray() { Show(); WindowState = WindowState.Normal; Activate(); }

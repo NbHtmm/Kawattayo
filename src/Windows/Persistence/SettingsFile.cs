@@ -69,6 +69,7 @@ internal sealed class SettingsFile(string file)
         data.RecursiveFolders ??= true;
         data.ExcludedFilePatterns = FileExclusions.Normalize(data.ExcludedFilePatterns);
         data.PollSeconds = Math.Clamp(data.PollSeconds, AppDefaults.MinimumPollSeconds, AppDefaults.MaximumPollSeconds);
+        data.StableSeconds = Math.Clamp(data.StableSeconds, 1, 300);
         return data;
     }
 

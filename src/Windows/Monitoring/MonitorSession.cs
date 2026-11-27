@@ -12,11 +12,13 @@ internal sealed partial class MonitorSession
     private bool __closing;
     private DateTimeOffset? __lastPoll;
     private readonly TimeProvider __clock;
+    private readonly long __clockOrigin;
 
     internal MonitorSession(StateStore store, IMonitorTimer pollTimer, IMonitorTimer flushTimer, TimeProvider? clock = null)
     {
         __store = store;
         __clock = clock ?? TimeProvider.System;
+        __clockOrigin = __clock.GetTimestamp();
         __pollTimer = pollTimer;
         __scanFlush = flushTimer;
         __scanFlush.Interval = TimeSpan.FromMilliseconds(150);
@@ -69,6 +71,7 @@ internal sealed partial class MonitorSession
         __pollError = null;
         __pollTimer.Stop();
         ResetQuietScan();
+        ResetPendingAlerts();
         foreach (var scan in __runningScans) scan.Cancel();
     }
 
