@@ -5,6 +5,7 @@
 . (Join-Path $PSScriptRoot 'SettingsScenario.ps1')
 . (Join-Path $PSScriptRoot 'BulkDownload.ps1')
 . (Join-Path $PSScriptRoot 'HistoryScenario.ps1')
+. (Join-Path $PSScriptRoot 'RecursionScenario.ps1')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -98,7 +99,7 @@ try {
         $desktopReady = $true
     } catch {
         $message = $_.Exception.Message
-        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-006','SCT-GUI-011','SCT-GUI-012','SCT-GUI-013','SCT-PERSIST-001','SCT-PERSIST-002','SCT-PERSIST-003') {
+        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-006','SCT-GUI-010','SCT-GUI-011','SCT-GUI-012','SCT-GUI-013','SCT-PERSIST-001','SCT-PERSIST-002','SCT-PERSIST-003') {
             $results.Add(@{ id = $id; outcome = 'BLOCKED'; error = $message })
             Write-Host "BLOCKED ${id}: $message"
         }
@@ -129,6 +130,7 @@ try {
         Invoke-Case 'SCT-GUI-004' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-004') 'FileLifecycle' }
         Invoke-Case 'SCT-GUI-005' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-005') 'FolderOffline' }
         Invoke-Case 'SCT-GUI-006' { Invoke-SctUnreadScenario -Package $package -Work (Join-Path $out 'SCT-GUI-006') -BulkDownload }
+        Invoke-Case 'SCT-GUI-010' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-010') 'Recursion' }
         Invoke-Case 'SCT-GUI-011' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-011') 'Exclusions' }
         Invoke-Case 'SCT-GUI-012' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-012') 'History' }
         Invoke-Case 'SCT-GUI-013' { Invoke-SctExistingInstance $package (Join-Path $out 'SCT-GUI-013') }
@@ -168,6 +170,11 @@ try {
             if ($result.id -in 'SCT-GUI-004','SCT-GUI-005','SCT-GUI-011','SCT-GUI-013') {
                 $result.testCode = 'test/SCT/MonitorLifecycle.ps1'
                 $log = "$($result.id)/observations.txt"
+                if (Test-Path -LiteralPath (Join-Path $out $log)) { $result.evidence = @($log) }
+            }
+            if ($result.id -eq 'SCT-GUI-010') {
+                $result.testCode = 'test/SCT/RecursionScenario.ps1'
+                $log = 'SCT-GUI-010/observations.txt'
                 if (Test-Path -LiteralPath (Join-Path $out $log)) { $result.evidence = @($log) }
             }
             if ($result.id -eq 'SCT-GUI-012') {

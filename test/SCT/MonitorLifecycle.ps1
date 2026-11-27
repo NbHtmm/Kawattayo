@@ -14,6 +14,13 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
         IsFolder = $folder; Recursive = $folder; RecursiveOverride = $folder }
     $settings = @{ Version = 1; Items = @($target); KeepInTray = $false; PollSeconds = 5;
         LowServerLoad = $false; NotifyDeleted = $true; WaitForStable = $false; ExcludedFilePatterns = @('~$*','*.tmp') }
+    if ($Mode -eq 'Recursion') {
+        $target.Recursive = $false
+        $target.RecursiveOverride = $null
+        $settings.RecursiveFolders = $false
+        [void][IO.Directory]::CreateDirectory((Join-Path $root 'depth'))
+        [IO.File]::WriteAllText((Join-Path $root 'depth/deep.txt'),'exists before recursive baseline')
+    }
     $settingsPath = Join-Path $install 'settings.json'
     if (Test-Path -LiteralPath $settingsPath) { throw 'Expected a clean fixture.' }
     [IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 5))
@@ -27,6 +34,7 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
         switch ($Mode) {
             'FolderOffline' { Test-SctLocalFolderOffline $p $view $root $file $evidence }
             'Exclusions' { Test-SctFolderExclusions $p $view $root $evidence }
+            'Recursion' { Test-SctRecursion $p $view $root $file $evidence }
             'History' { Test-SctHistory $p $view $root $evidence }
             'FileLifecycle' { Test-SctFileLifecycle $p $view $file $evidence }
             default { throw "Unknown GUI scenario: $Mode." }
