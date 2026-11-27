@@ -39,8 +39,9 @@ internal sealed class StateStore(string file, string? database = null)
 
     internal static StateStore BesideExecutable(string directory)
     {
-        var file = Path.Combine(directory, AppDefaults.SettingsFileName);
-        var store = new StateStore(file, Path.Combine(directory, "cache.sqlite3"));
+        var paths = new WindowsAppPaths(directory);
+        var file = paths.Settings;
+        var store = new StateStore(file, paths.Cache);
         if (!File.Exists(file) && !File.Exists(file + ".bak"))
         {
             store.WriteSettings(store.SerializeSettings(new()));

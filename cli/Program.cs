@@ -20,7 +20,7 @@ internal static class Program
         using var cancel = new CancellationTokenSource();
         ConsoleCancelEventHandler onCancel = (_, e) => { e.Cancel = true; cancel.Cancel(); };
         Console.CancelKeyPress += onCancel;
-        try { return Run(args, new Checkpoints(AppContext.BaseDirectory), cancel.Token); }
+        try { return Run(args, new WindowsAppPaths(AppContext.BaseDirectory).CreateCheckpoints(), cancel.Token); }
         catch (OperationCanceledException) { return 130; }
         catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
@@ -32,7 +32,7 @@ internal static class Program
     {
         if (args is ["checkpoint", "list"])
         {
-            foreach (var item in points.List()) Console.WriteLine($"{item.Id}\t{item}");
+            foreach (var item in points.List()) Console.WriteLine($"{item.Id}\t{item.Name} ｜ {item.At.ToLocalTime():yyyy/MM/dd HH:mm:ss} ｜ {item.Root}");
             return 0;
         }
         if (args is ["checkpoint", "create", .. var fields])
@@ -52,16 +52,16 @@ internal static class Program
         if (!collect)
         {
             if (options.Has("--json")) Json(w => Changes(w, result.Changes));
-            else foreach (var change in result.Changes) Console.WriteLine(change);
+            else foreach (var change in result.Changes) Console.WriteLine(Describe(change));
             return unknown.Length == 0 ? 0 : 3;
         }
-        var copies = Checkpoints.Collect(result.Info, result.Changes, output!, stop);
+        var copies = points.Collect(result.Info, result.Changes, output!, stop);
         stop.ThrowIfCancellationRequested();
         if (options.Has("--json")) Json(w => Copies(w, copies, unknown));
         else
         {
             foreach (var copy in copies) Console.WriteLine(copy.Saved ?? $"未保存：{copy.Source} ｜ {copy.Error}");
-            foreach (var skipped in unknown) Console.WriteLine(skipped);
+            foreach (var skipped in unknown) Console.WriteLine(Describe(skipped));
         }
         return unknown.Length == 0 && copies.All(x => x.Saved is not null) ? 0 : 3;
     }
@@ -76,6 +76,17 @@ internal static class Program
             1 => names[0].Id, 0 => throw new IOException("チェックポイントが見つかりません。"),
             _ => throw new ArgumentException("同名のチェックポイントがあります。一覧からIDを指定してください。")
         };
+    }
+
+    private static string Describe(CheckpointDifference change)
+    {
+        var kind = change.Kind switch
+        {
+            DifferenceKind.Added => "追加", DifferenceKind.Updated => "更新",
+            DifferenceKind.Deleted => "削除", _ => "確認不能"
+        };
+        return $"{kind} ｜ {(change.Relative.Length == 0 ? "対象フォルダ" : change.Relative)}" +
+            (change.Error is null ? "" : " ｜ " + change.Error);
     }
 
     private static void Changes(Utf8JsonWriter writer, IEnumerable<CheckpointDifference> changes)

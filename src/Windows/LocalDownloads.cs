@@ -1,9 +1,6 @@
 namespace ShareFileWatch;
 
-internal sealed record DownloadRequest(string Source, string Relative, Fingerprint? Expected = null, string? SourceRoot = null);
-internal sealed record DownloadResult(string Source, string? Saved, string? Error);
-
-internal static class LocalDownloads
+internal sealed class LocalDownloads : ICheckpointDownloads
 {
     private const string Zone = ":Zone.Identifier";
 
@@ -16,7 +13,7 @@ internal static class LocalDownloads
 
     internal static bool CanOpen(string path) => Documents.Contains(Path.GetExtension(path));
 
-    internal static DownloadResult[] Save(string folder, IReadOnlyList<DownloadRequest> requests, CancellationToken stop)
+    public DownloadResult[] Save(string folder, IReadOnlyList<DownloadRequest> requests, CancellationToken stop)
     {
         return requests.Select(request => SaveOne(folder, request, stop)).ToArray();
     }

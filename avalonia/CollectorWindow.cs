@@ -1,3 +1,4 @@
+using Avalonia.Controls.Templates;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -22,6 +23,8 @@ internal sealed class CollectorWindow : Window
     internal CollectorWindow(Checkpoints checkpoints, Action showMonitor)
     {
         this.checkpoints = checkpoints;
+        saved.ItemTemplate = new FuncDataTemplate<CheckpointInfo>((item, _) => item is null ? null : new TextBlock { Text = CheckpointLabels.Describe(item) });
+        results.ItemTemplate = new FuncDataTemplate<CheckpointDifference>((item, _) => item is null ? null : new TextBlock { Text = CheckpointLabels.Describe(item) });
         Title = "かわったよ · 差分収集";
         using (var icon = GetType().Assembly.GetManifestResourceStream("collector.ico"))
             if (icon is not null) Icon = new WindowIcon(icon);
@@ -98,7 +101,7 @@ internal sealed class CollectorWindow : Window
         if (preview is not { } info) return;
         var selected = SelectedChanges();
         if (selected.Length == 0 || await PickFolder("保存先を選択") is not { } output) return;
-        var copies = await Task.Run(() => Checkpoints.Collect(info, selected, output, stop), stop);
+        var copies = await Task.Run(() => checkpoints.Collect(info, selected, output, stop), stop);
         status.Text = $"保存 {copies.Count(x => x.Saved is not null):N0}件 ／ 未保存 {copies.Count(x => x.Saved is null):N0}件\n" +
             string.Join("\n", copies.Select(x => x.Saved ?? $"{x.Source}：{x.Error}"));
     });
