@@ -116,7 +116,7 @@ try {
             Write-Host "BLOCKED ${id}: $message"
         }
     }
-    foreach ($id in 'SCT-CLI-001','SCT-CLI-002','SCT-CLI-003','SCT-CLI-004','SCT-CLI-005','SCT-CLI-006','SCT-CLI-008','SCT-CLI-009','SCT-CLI-010','SCT-CLI-011') {
+    foreach ($id in 'SCT-CLI-001','SCT-CLI-002','SCT-CLI-003','SCT-CLI-004','SCT-CLI-005','SCT-CLI-006','SCT-CLI-008','SCT-CLI-009','SCT-CLI-010','SCT-CLI-011','SCT-CLI-013') {
         Invoke-Case $id { Invoke-CheckpointScenario -CaseId $id }
     }
 
@@ -189,6 +189,7 @@ try {
             }
             if ($caseId -eq 'SCT-CLI-011') { $result.testCode = 'test/SCT/Steps/CheckpointVolumeSteps.cs' }
             if ($caseId -eq 'SCT-CLI-012') { $result.testCode = 'test/SCT/Steps/CheckpointZoneSteps.cs' }
+            if ($caseId -eq 'SCT-CLI-013') { $result.testCode = 'test/SCT/Steps/CheckpointLockedSourceSteps.cs' }
             $result.evidence = @('sct.trx', 'cucumber.ndjson' |
                 ForEach-Object { "$caseId/$_" } | Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
         } elseif ($result.id -ne 'SCT-SETUP') {
