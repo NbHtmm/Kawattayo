@@ -13,6 +13,8 @@ internal sealed partial class MonitorSession
     private readonly List<MonitorAlert> __alertsPending = [];
 #if KAWATTAYO_SMOKE
     internal Action? BeforeApplyForTest { get; set; }
+    internal Action<bool>? ScanModeForTest { get; set; }
+    internal Action<ObservedFileUpdate>? HookCandidateForTest { get; set; }
 #endif
 
     private void FlushScanUpdates()
@@ -61,7 +63,8 @@ internal sealed partial class MonitorSession
         {
             if (!low || !__checks.TryGetValue(i.Id,out var c) || !c.Reliable || c.Revision != i.Revision) return true;
             var f = feeds!.GetValueOrDefault(i.Id);
-            return f != c.Feed || f != null && (f.Epoch != c.Epoch || f.Watcher != null && (f.Failed || f.Stamp(i.IsFolder,i.Path) != c.Stamp));
+            return ReconciliationDue(c) || f != c.Feed || f is null || !f.Available ||
+                f.Epoch != c.Epoch || f.Failed || f.Stamp(i.IsFolder, i.Path) != c.Stamp;
         }
         var groups = __state.Items
             .Where(x => (x.IsFolder || !FileExclusions.Matches(x.Path, exclusions)) && Due(x))
@@ -143,6 +146,9 @@ internal sealed partial class MonitorSession
             var baseline = item.Inventory;
             var priorExclusions = item.InventoryExclusions;
             var (stamp, paths) = CaptureFeedDelta(target, baseline);
+#if KAWATTAYO_SMOKE
+            ScanModeForTest?.Invoke(paths is null);
+#endif
             var result = await Task.Run(() => __probe.Read(target.Request, cancellation, baseline, paths, priorExclusions));
 #if KAWATTAYO_SMOKE
             BeforeApplyForTest?.Invoke();
@@ -151,7 +157,7 @@ internal sealed partial class MonitorSession
 
             // 監視先の一部が遅くても、取得できた結果から表示・保存に回す。
             ApplyResult(result, seenPaths);
-            UpdateCheckpoint(target, result, stamp);
+            UpdateCheckpoint(target, result, stamp, full: paths is null);
         }
         finally
         {
@@ -164,15 +170,19 @@ internal sealed partial class MonitorSession
     private (long Stamp, string[]? Paths) CaptureFeedDelta(ScanTarget target, Dictionary<string, Fingerprint>? baseline)
     {
         var feed = target.Feed;
-        if (target.IsFolder && baseline is not null && feed is { Failed: false, Watcher: not null } &&
+        if (target.IsFolder && baseline is not null && feed is { Failed: false, Available: true } &&
             __checks.TryGetValue(target.Id, out var prior) && prior.Reliable && prior.Feed == feed &&
-            prior.Epoch == feed.Epoch && prior.Revision == target.Revision)
+            prior.Epoch == feed.Epoch && prior.Revision == target.Revision && !ReconciliationDue(prior))
             return feed.Snapshot(prior.Stamp);
 
         return (feed?.Stamp(target.IsFolder, target.Path) ?? 0, null);
     }
 
-    private void UpdateCheckpoint(ScanTarget target, WatchObservation result, long stamp)
+    // イベントが来ないままでも、最後の全件成功から一定時間後に読み直す。
+    private bool ReconciliationDue(Checkpoint prior) =>
+        prior.LastFull is not long last || __clock.GetElapsedTime(last) >= ReconcileInterval;
+
+    private void UpdateCheckpoint(ScanTarget target, WatchObservation result, long stamp, bool full)
     {
         bool success = target.IsFolder ? result.Folder?.Files is not null : result.File?.State != ProbeState.Unavailable;
         if (!target.Low)
@@ -182,8 +192,9 @@ internal sealed partial class MonitorSession
         }
 
         var feed = target.Feed;
-        bool reliable = success && feed is { Watcher: not null, Failed: false };
-        __checks[target.Id] = new(target.Revision, feed, stamp, reliable, feed?.Epoch ?? 0);
+        bool reliable = success && feed is { Available: true, Failed: false };
+        long? lastFull = success && full ? __clock.GetTimestamp() : __checks.GetValueOrDefault(target.Id)?.LastFull;
+        __checks[target.Id] = new(target.Revision, feed, stamp, reliable, feed?.Epoch ?? 0, lastFull);
     }
 
     private bool CanApplyScan(int generation) =>
@@ -201,7 +212,15 @@ internal sealed partial class MonitorSession
     {
         var item = __state.Items.Find(x => x.Id == result.Id);
         var hook = item is null ? null : Hooks.Get(item.Id, item.Path);
-        if (MonitoringReducer.Apply(__state, result, seenPaths, hook is not null) is not { } outcome) return;
+        bool collectHookCandidates = hook is not null;
+#if KAWATTAYO_SMOKE
+        collectHookCandidates |= HookCandidateForTest is not null;
+#endif
+        if (MonitoringReducer.Apply(__state, result, seenPaths, collectHookCandidates) is not { } outcome) return;
+#if KAWATTAYO_SMOKE
+        if (HookCandidateForTest is { } observer)
+            foreach (var file in outcome.FileUpdates) observer(file);
+#endif
 
         if (hook is not null)
             foreach (var file in outcome.FileUpdates)

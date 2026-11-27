@@ -11,10 +11,12 @@ internal sealed partial class MonitorSession
     private readonly IMonitorTimer __scanFlush;
     private bool __closing;
     private DateTimeOffset? __lastPoll;
+    private readonly TimeProvider __clock;
 
-    internal MonitorSession(StateStore store, IMonitorTimer pollTimer, IMonitorTimer flushTimer)
+    internal MonitorSession(StateStore store, IMonitorTimer pollTimer, IMonitorTimer flushTimer, TimeProvider? clock = null)
     {
         __store = store;
+        __clock = clock ?? TimeProvider.System;
         __pollTimer = pollTimer;
         __scanFlush = flushTimer;
         __scanFlush.Interval = TimeSpan.FromMilliseconds(150);

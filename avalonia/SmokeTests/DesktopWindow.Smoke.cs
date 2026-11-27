@@ -97,6 +97,7 @@ internal sealed partial class DesktopWindow
                 Require(!json.Contains("PendingFiles") && !json.Contains("History") && !json.Contains("Inventory"), "設定専用JSON");
                 await CapturePreviewScreens(fixture);
                 CheckpointTests.Run(fixture);
+                await ReconciliationTests.Run(fixture);
                 await HookTests.Run(fixture);
                 ShowCollector();
                 if (collector?.IsVisible != true || !IsVisible) throw new InvalidOperationException("Independent collector did not open.");

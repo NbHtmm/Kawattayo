@@ -5,9 +5,21 @@ namespace ShareFileWatch;
 internal sealed partial class MonitorSession
 {
     private const int SubscriptionLimit = 32;
+    private static readonly TimeSpan ReconcileInterval = TimeSpan.FromMinutes(15);
+#if KAWATTAYO_SMOKE
+    internal bool UseSyntheticFeedForTest { get; set; }
+    internal void FeedEventForTest(string path)
+    {
+        foreach (var feed in __feeds.Values) feed.Signal(path);
+    }
+    internal void FailFeedForTest()
+    {
+        foreach (var feed in __feeds.Values) feed.Failed = true;
+    }
+#endif
     private readonly Dictionary<string, ChangeFeed> __feeds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, Checkpoint> __checks = [];
-    private sealed record Checkpoint(int Revision, ChangeFeed? Feed, long Stamp, bool Reliable, int Epoch);
+    private sealed record Checkpoint(int Revision, ChangeFeed? Feed, long Stamp, bool Reliable, int Epoch, long? LastFull);
 
     // Callbacks only set dirty markers. Independent registrations in one directory share a handle.
     private sealed class ChangeFeed(string directory, bool recursive, Func<string,bool> internalFile)
@@ -21,13 +33,21 @@ internal sealed partial class MonitorSession
             lock (journal) return (version, since < discarded ? null : journal.Where(p => p.Value > since).Select(p => p.Key).ToArray());
         }
         public long Stamp(bool folder,string path) => folder ? Interlocked.Read(ref version) : Names.GetValueOrDefault(path);
-        public FileSystemWatcher? Watcher;
+        private FileSystemWatcher? Watcher;
+        public bool Available => Watcher != null
+#if KAWATTAYO_SMOKE
+            || Synthetic
+#endif
+            ;
+#if KAWATTAYO_SMOKE
+        public bool Synthetic;
+#endif
         private FileSystemWatcher? parentWatcher;
         public volatile bool Failed;
         public int Epoch;
         private long retry;
         private bool retired;
-        private void Signal(string path)
+        internal void Signal(string path)
         {
             if (internalFile(path)) return;
             lock (journal)
@@ -39,6 +59,13 @@ internal sealed partial class MonitorSession
         }
         public async Task Start(long now)
         {
+#if KAWATTAYO_SMOKE
+            if (Synthetic)
+            {
+                if (Failed) { Failed = false; Epoch++; }
+                return;
+            }
+#endif
             if (Failed && Watcher != null) { CloseWatchers(); Epoch++; }
             if (Watcher != null || now < retry || retired) return;
             Failed = false; retry = now + 5000;
@@ -95,6 +122,9 @@ internal sealed partial class MonitorSession
                 slots += cost; keep.Add(key);
             }
             if (!__feeds.TryGetValue(key,out var feed)) __feeds[key] = feed = new(dir,recursive,__store.IsInternalFile);
+#if KAWATTAYO_SMOKE
+            feed.Synthetic = UseSyntheticFeedForTest;
+#endif
             bindings[item.Id] = feed;
             if (!names.TryGetValue(feed,out var set)) names[feed] = set = new(StringComparer.OrdinalIgnoreCase);
             if (!item.IsFolder) { set.Add(item.Path); feed.Names.TryAdd(item.Path,0); }
@@ -115,8 +145,8 @@ internal sealed partial class MonitorSession
         return checkpoint.Feed switch
         {
             null => "購読枠外（毎回照会）",
-            { Watcher: not null, Failed: false } when checkpoint.Reliable => "通知待機中",
-            { Watcher: not null, Failed: false } => "照会失敗（毎回照会）",
+            { Available: true, Failed: false } when checkpoint.Reliable => "通知待機中",
+            { Available: true, Failed: false } => "照会失敗（毎回照会）",
             _ => "利用不可（毎回照会）"
         };
     }
