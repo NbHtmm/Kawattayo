@@ -137,3 +137,23 @@ function Confirm-SctDatabaseStartupFailure([string]$Exe) {
         } finally { $process.Dispose() }
     }
 }
+
+# Acquire the lock before changing unread state: no background flush can save that change first.
+function Test-SctDatabaseSaveFailure($Process,$View,[string]$Database) {
+    $lock = Wait-SctUi 'idle fixture database' {
+        try { [IO.File]::Open($Database,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None) }
+        catch [IO.IOException] { $null }
+    }
+    try {
+        Invoke-SctUiButton $View 'SCT-Alpha を既読にする'
+        Wait-SctRemainingUnread $Process
+        if (!$Process.CloseMainWindow()) { throw 'Could not request a normal fixture exit.' }
+        $dialog = Wait-SctUi 'saving failed so the app refuses to exit' {
+            if ($Process.HasExited) { throw 'The app exited despite the unsaved unread change.' }
+            $window = Get-SctOwnedWindow $Process.Id 'かわったよ'
+            if ($window -and (Get-SctUiLabel $window '保存できなかったため終了していません。' -Prefix)) { $window }
+        }
+        Confirm-SctNativeSettingsDialog $dialog $Process.Id
+        Wait-SctRemainingUnread $Process
+    } finally { $lock.Dispose() }
+}

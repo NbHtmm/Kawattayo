@@ -1,5 +1,5 @@
 ﻿# Test the packaged GUI through Windows UI Automation. Only the fixture's settings are seeded.
-function Invoke-SctUnreadScenario([string]$Package, [string]$Work, [switch]$DatabaseOutage, [switch]$BulkDownload) {
+function Invoke-SctUnreadScenario([string]$Package, [string]$Work, [switch]$DatabaseOutage, [switch]$BulkDownload, [switch]$DatabaseWriteOutage) {
     Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
     [void][IO.Directory]::CreateDirectory($Work)
     $app = Join-Path $Work 'app'
@@ -56,7 +56,12 @@ function Invoke-SctUnreadScenario([string]$Package, [string]$Work, [switch]$Data
             Test-SctBulkDownload $p $view $Work $paths $evidence
             return
         }
-        Invoke-SctUiButton $view 'SCT-Alpha を既読にする'
+        if ($DatabaseWriteOutage) {
+            Test-SctDatabaseSaveFailure $p $view (Join-Path $app 'cache.sqlite3')
+            [IO.File]::AppendAllText($evidence, 'PASS during a write outage: exit refused and the pending acknowledgment remained in memory.' + [Environment]::NewLine)
+        } else {
+            Invoke-SctUiButton $view 'SCT-Alpha を既読にする'
+        }
         Wait-SctRemainingUnread $p
         foreach ($path in $paths) {
             if (![IO.File]::Exists($path) -or [IO.File]::ReadAllText($path) -cne 'SCT fixture') {
