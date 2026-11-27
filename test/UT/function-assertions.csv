@@ -75,3 +75,7 @@ cli/Program.cs,"Program.Options.Options(string[] args, string[] fields, string[]
 "src/Core/State.cs","ShareFileWatch.WatchItem.RecordChange(string change, int count, DateTimeOffset now)","StateTests","ObserveFolder_UnreadAndPendingCountsSaturateInsteadOfOverflowing","1"
 "src/Core/State.cs","ShareFileWatch.WatchItem.AddPending(FileChange change)","StateTests","ObserveFolder_UnreadAndPendingCountsSaturateInsteadOfOverflowing","1"
 "src/Windows/Monitoring/WindowsWatchProbe.cs","ShareFileWatch.WindowsWatchProbe.Read(WatchScanRequest target, CancellationToken cancellation = default, Dictionary<string,Fingerprint>? baseline = null, string[]? paths = null, string[]? priorExclusions = null)","WindowsWatchProbeTests","Read_AppOwnedFileIsUnavailableAndKeepsTargetIdentity","3"
+"src/Windows/Monitoring/SnapshotWriter.cs","ShareFileWatch.SnapshotWriter.Enqueue()","SnapshotWriterTests","FlushAsync_CoalescesQueuedRequestsAndWaitsUntilLatestSnapshotIsSaved","1"
+"src/Windows/Monitoring/SnapshotWriter.cs","ShareFileWatch.SnapshotWriter.FlushAsync()","SnapshotWriterTests","FlushAsync_RetriesOnceAndReportsFailureUntilLatestVersionCanBeSaved","1"
+"src/Windows/Monitoring/SnapshotWriter.cs","ShareFileWatch.SnapshotWriter.StartIfPending()","SnapshotWriterTests","FlushAsync_CoalescesQueuedRequestsAndWaitsUntilLatestSnapshotIsSaved","1"
+"src/Windows/Monitoring/SnapshotWriter.cs","ShareFileWatch.SnapshotWriter.WriteAsync()","SnapshotWriterTests","FlushAsync_CoalescesQueuedRequestsAndWaitsUntilLatestSnapshotIsSaved","1"
