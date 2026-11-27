@@ -29,7 +29,8 @@ internal static class InventoryTests
         store.Save(state);
 
         var settingsBefore = File.ReadAllBytes(json);
-        var backupBefore = File.ReadAllBytes(json + ".bak");
+        string backup = json + ".bak";
+        Check(!File.Exists(backup) && !File.Exists(json + ".tmp"), "a successful settings write leaves no backup or temporary file");
         using (var settings = JsonDocument.Parse(settingsBefore))
         {
             string[] allowedSettings = ["Pinned", "LowServerLoad", "WatchDirectoryTime", "NotifyDeleted", "ExcludedFilePatterns",
@@ -49,8 +50,8 @@ internal static class InventoryTests
 
         item.Acknowledge();
         store.Save(state);
-        Check(File.ReadAllBytes(json).SequenceEqual(settingsBefore) && File.ReadAllBytes(json + ".bak").SequenceEqual(backupBefore),
-            "activity-only saves do not touch settings or backup");
+        Check(File.ReadAllBytes(json).SequenceEqual(settingsBefore) && !File.Exists(backup),
+            "activity-only saves do not touch settings or create a backup");
         saved = StateStore.BesideExecutable(dir).Load().State;
         Check(saved.Items.Single() is { Unread: 0, AcknowledgedAt: not null } && saved.History.Count == 1,
             "acknowledging remains persisted separately from history");
@@ -59,11 +60,25 @@ internal static class InventoryTests
         state.PollSeconds = 91;
         store.Save(state);
         Check(File.ReadAllBytes(db).SequenceEqual(dbBefore), "settings-only save does not touch SQLite");
+        Check(!File.Exists(backup) && !File.Exists(json + ".tmp"), "subsequent settings changes still leave no backup");
         File.WriteAllText(json, "{");
+        try
+        {
+            StateStore.BesideExecutable(dir).Load();
+            throw new InvalidOperationException("invalid settings without a backup must not be silently reset");
+        }
+        catch (IOException)
+        {
+            Check(File.ReadAllText(json) == "{" && !File.Exists(backup), "leave invalid settings untouched if no backup exists");
+        }
+
+        // 既存の .bak は復元に使えるが、復元後も元の .bak の内容は変えない。
+        File.WriteAllBytes(backup, settingsBefore);
         var recovered = StateStore.BesideExecutable(dir).Load();
         Check(recovered.Warning is not null && recovered.State.PollSeconds == 37 &&
             recovered.State.Items.Single().Unread == 0 && recovered.State.History.Count == 1,
             "settings backup recovery does not roll SQLite back");
+        Check(File.ReadAllBytes(backup).SequenceEqual(settingsBefore), "recovery leaves an existing backup untouched");
 
         File.Move(db, db + ".held");
         var noCache = StateStore.BesideExecutable(dir).Load().State;

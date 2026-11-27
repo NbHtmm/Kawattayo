@@ -41,7 +41,7 @@ internal sealed partial class DesktopWindow
                 Require(__inbox.Items.Count == 3 && __inbox.Items.Cast<Row>().Last().Path == sample, "再帰ツリーの展開");
                 await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                 var collapse = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "すべて折りたたむ"));
-                Require(Title == "かわったよ v0.2.4 · Avalonia", "タイトルのバージョン");
+                Require(Title == "かわったよ v0.2.5 · Avalonia", "タイトルのバージョン");
                 Require(collapse is { IsEffectivelyVisible: true, Bounds.Width: > 0, Bounds.Height: > 0 }
                     && collapse.TranslatePoint(default, this) is { } location
                     && location.X >= 0 && location.Y >= 0

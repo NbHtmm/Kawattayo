@@ -5,7 +5,7 @@ namespace ShareFileWatch;
 /// @brief 設定ファイルと観測キャッシュを独立に読み書きする。
 internal sealed class StateStore(string file, string? database = null)
 {
-    private readonly string __backup = file + ".bak";
+    private readonly string __backup = file + ".bak"; // 以前の版で作成済みのものを救済にだけ使う。
     private readonly string __temporary = file + ".tmp";
     private readonly string __database = database ?? Path.ChangeExtension(file, ".sqlite3");
     private readonly HashSet<string> __internalFiles = InternalFiles(file, database ?? Path.ChangeExtension(file, ".sqlite3"));
@@ -164,7 +164,8 @@ internal sealed class StateStore(string file, string? database = null)
                 stream.Write(System.Text.Encoding.UTF8.GetBytes(settings));
                 stream.Flush(flushToDisk: true);
             }
-            if (File.Exists(file)) File.Replace(__temporary, file, __backup, true);
+            // 書き換えは従来通り一括で行うが、新しいバックアップは作らない。
+            if (File.Exists(file)) File.Replace(__temporary, file, null, true);
             else File.Move(__temporary, file);
             __savedSettings = settings;
         }

@@ -1,4 +1,4 @@
-# かわったよ Avalonia 版（v0.2.4）
+# かわったよ Avalonia 版（v0.2.5）
 
 Windows 11 x64 用の別ビルドです。Native AOT の配布 ZIP を展開し、
 `かわったよ.exe` を実行します。別途 .NET ランタイムや SQLite のインストールは不要です。
@@ -7,8 +7,9 @@ Windows 11 x64 用の別ビルドです。Native AOT の配布 ZIP を展開し�
 ## v0.1.4 の設定を使用する
 
 旧アプリを通知領域から完全に終了し、同じフォルダにある `settings.json` と
-`cache.sqlite3`（存在する場合）、`settings.json.bak`（存在する場合）を
+`cache.sqlite3`（存在する場合）を
 Avalonia 版の展開先に**コピー**します。旧アプリや元のファイルは残してください。
+新たに `settings.json.bak` は生成しません。既存のものは、メインの設定が読めない場合に限り復元に使います。
 v0.1.3 以前の `cache.json` は読み込みません。実際の監視パスや履歴を含むため共有・公開しないでください。
 
 ## 操作
@@ -34,7 +35,7 @@ Avalonia の画面・ビルド設定は `avalonia/`、
 .\tool\build.bat
 ```
 
-`build.bat` は .NET SDK を直接呼び出し、PowerShell スクリプトを実行しません。実行ファイルと DLL は `bin` に出力します。配布 ZIP の作成は別の操作です。PowerShell スクリプトの実行が許可されている開発環境で `.\tool\package-avalonia.ps1` を実行してください。Visual Studio で開く場合は avalonia/Kawattayo.Avalonia.csproj を選んでください。ZIP の出力は `build/Kawattayo_v0.2.4_Avalonia_Windows_x64.zip` です。
+`build.bat` は .NET SDK を直接呼び出し、PowerShell スクリプトを実行しません。実行ファイルと DLL は `bin` に出力します。配布 ZIP の作成は別の操作です。PowerShell スクリプトの実行が許可されている開発環境で `.\tool\package-avalonia.ps1` を実行してください。Visual Studio で開く場合は avalonia/Kawattayo.Avalonia.csproj を選んでください。ZIP の出力は `build/Kawattayo_v0.2.5_Avalonia_Windows_x64.zip` です。
 `-p:KawattayoUseNls=true` は比較用。標準設定では Windows の ICU を使います。
 NLS にしても Skia・HarfBuzz の DLL は不要にはなりません。
 
