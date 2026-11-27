@@ -2,6 +2,7 @@
 . (Join-Path $PSScriptRoot 'DesktopSetup.ps1')
 . (Join-Path $PSScriptRoot 'UnreadScenario.ps1')
 . (Join-Path $PSScriptRoot 'MonitorLifecycle.ps1')
+. (Join-Path $PSScriptRoot 'SettingsScenario.ps1')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -95,7 +96,7 @@ try {
         $desktopReady = $true
     } catch {
         $message = $_.Exception.Message
-        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-011','SCT-GUI-013') {
+        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-011','SCT-GUI-013','SCT-PERSIST-001') {
             $results.Add(@{ id = $id; outcome = 'BLOCKED'; error = $message })
             Write-Host "BLOCKED ${id}: $message"
         }
@@ -127,6 +128,7 @@ try {
         Invoke-Case 'SCT-GUI-005' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-005') 'FolderOffline' }
         Invoke-Case 'SCT-GUI-011' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-011') 'Exclusions' }
         Invoke-Case 'SCT-GUI-013' { Invoke-SctExistingInstance $package (Join-Path $out 'SCT-GUI-013') }
+        Invoke-Case 'SCT-PERSIST-001' { Invoke-SctSettingsRecovery $package (Join-Path $out 'SCT-PERSIST-001') }
     }
     if ($results.Where({ $_.outcome -ne 'PASS' }).Count -gt 0) { $status = 1 }
 } catch {
@@ -154,6 +156,11 @@ try {
             }
             if ($result.id -in 'SCT-GUI-004','SCT-GUI-005','SCT-GUI-011','SCT-GUI-013') {
                 $result.testCode = 'test/SCT/MonitorLifecycle.ps1'
+                $log = "$($result.id)/observations.txt"
+                if (Test-Path -LiteralPath (Join-Path $out $log)) { $result.evidence = @($log) }
+            }
+            if ($result.id -eq 'SCT-PERSIST-001') {
+                $result.testCode = 'test/SCT/SettingsScenario.ps1'
                 $log = "$($result.id)/observations.txt"
                 if (Test-Path -LiteralPath (Join-Path $out $log)) { $result.evidence = @($log) }
             }
