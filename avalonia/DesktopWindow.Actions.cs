@@ -84,7 +84,11 @@ internal sealed partial class DesktopWindow
     {
         var targets = items.DistinctBy(x => x.Id).ToArray();
         if (targets.Length == 0 || !WinDesktop.Confirm($"{targets.Length}件の監視登録を解除しますか？ 実ファイルは削除しません。", Handle)) return;
-        foreach (var target in targets) __state.Items.Remove(target);
+        foreach (var target in targets)
+        {
+            __monitor.Hooks.Disable(target.Id);
+            __state.Items.Remove(target);
+        }
         __monitor.UpdateSettings(true);
     }
 

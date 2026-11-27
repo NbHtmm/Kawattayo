@@ -61,6 +61,7 @@ internal sealed partial class DesktopWindow
             if (row.Root)
             {
                 Add("表示名を変更", () => _ = Rename(target));
+                Add("更新フック…", () => _ = ConfigureHook(target));
                 if (target.IsFolder)
                 {
                     Add("再帰監視：オン", () => SetRecursive(target, true));

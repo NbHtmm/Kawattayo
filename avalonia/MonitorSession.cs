@@ -17,6 +17,7 @@ internal sealed partial class MonitorSession
     internal MonitorSession(StateStore store)
     {
         __store = store;
+        Hooks = new UpdateHooks(store.StorageDirectory);
         (__state, StartupWarning) = store.Load();
         __writer = new(__state.CaptureForSave, __store.Save, UpdateStatus);
         __pollTimer.Tick += async (_, _) => await Scan(automatic: true);
@@ -25,6 +26,7 @@ internal sealed partial class MonitorSession
 
     internal AppState State => __state;
     internal StateStore Store => __store;
+    internal UpdateHooks Hooks { get; }
     internal string? StartupWarning { get; }
     internal event Action<bool>? RowsChanged;
     internal event Action? ProgressChanged;
@@ -74,7 +76,7 @@ internal sealed partial class MonitorSession
         __closing = true;
         StopScans();
         __scanFlush.Stop();
-        try { await __writer.FlushAsync(); }
+        try { await __writer.FlushAsync(); Hooks.Dispose(); }
         catch
         {
             // 保存できなければウィンドウを閉じない。修復後の再試行まで未保存の状態を残す。

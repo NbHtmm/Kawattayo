@@ -12,6 +12,11 @@ internal static class DesktopEntry
     public static int Main(string[] args)
     {
 #if KAWATTAYO_SMOKE
+        if (args is ["--hook-test-probe", var output, var received])
+        {
+            File.WriteAllText(output, received);
+            return 0;
+        }
         if (args.Length == 3 && args[0] == "--smoke")
         {
             DesktopApp.SmokeFolder = Path.GetFullPath(args[1]);

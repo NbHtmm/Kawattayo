@@ -245,9 +245,16 @@ internal sealed partial class MonitorSession
         var stampBefore = item.DirectoryStamp;
         var inventoryExclusionsBefore = item.InventoryExclusions;
         var lastWriteBefore = item.LatestFileWriteAt;
+        var hook = Hooks.Get(item.Id, item.Path);
         void Record(string path, string kind)
         {
             changed = true;
+            if (hook is not null && kind is ("追加" or "更新") && Path.GetFileName(path) != ".")
+            {
+                var expected = result.Folder?.Files?.GetValueOrDefault(Path.GetRelativePath(item.Path, path))
+                    ?? result.File?.Fingerprint;
+                if (expected is not null) Hooks.Enqueue(item.Id, hook, path, expected);
+            }
             if (Path.GetFileName(path) == ".") path = Path.GetDirectoryName(path)!;
             // 再通知が有効なら既存の未読集合を作らず、同一巡回内の重複だけを抑える。
             RecordDetectedChange(path, kind, result.At, pending?.Value, seenPaths, alerts);
