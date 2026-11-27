@@ -8,7 +8,13 @@ internal static class WindowActivation
 {
     // 他のデータやコマンドは受け付けず、2種類の画面表示だけを既存ウィンドウへ通知する。
     private const string WindowProperty = "Kawattayo.Activation.2040A88F";
-    internal static readonly uint Message = RegisterWindowMessage(WindowProperty);
+    // 引数の解析だけでは Windows メッセージを登録しない。
+    internal static uint Message => NativeRegistration.Message;
+
+    private static class NativeRegistration
+    {
+        internal static readonly uint Message = RegisterWindowMessage(WindowProperty);
+    }
     private static readonly nint Marker = 1;
 
     internal static WindowRequest FromArguments(string[] args) =>

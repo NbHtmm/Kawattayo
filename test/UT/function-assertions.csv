@@ -118,3 +118,6 @@ cli/Program.cs,"Program.Options.Options(string[] args, string[] fields, string[]
 "src/Windows/Persistence/SettingsFile.cs","ShareFileWatch.SettingsFile.ValidateSettings(AppState data)","SettingsFileTests","ValidateSettings_RejectsMissingAndDuplicateRegistrationIdentities","1"
 "src/Windows/Persistence/SettingsFile.cs","ShareFileWatch.SettingsFile.ValidateSettings(AppState data)","SettingsFileTests","ValidateSettings_RejectsTheSamePathWrittenTwoWays","1"
 "src/Windows/Persistence/SettingsFile.cs","ShareFileWatch.SettingsFile.ValidateSettings(AppState data)","SettingsFileTests","ValidateSettings_RejectsUnusableRegistrations","4"
+"avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.FromArguments(string[] args)","WindowActivationTests","FromArguments_CollectorRequiresTheExactSingleSwitch","1"
+"avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.FromArguments(string[] args)","WindowActivationTests","FromArguments_SendsOrdinaryRequestsToTheMonitor","6"
+"avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.FromArguments(string[] args)","WindowActivationTests","FromArguments_MultipleWindowFlagsDoNotActivateTheCollector","1"

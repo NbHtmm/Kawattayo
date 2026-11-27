@@ -1,6 +1,5 @@
 source,signature,case_ids,scope
 "cli/Program.cs","Program.Main(string[] args)","SCT-CLI-005;SCT-CLI-008;SCT-CLI-009","Process exit codes and stdout/stderr through the actual executable"
-"avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.FromArguments(string[] args)","SCT-GUI-001;SCT-GUI-013","Monitor and collector arguments select independent Windows views"
 "avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.Register(nint handle)","SCT-GUI-013","Running fixture receives secondary process activation"
 "avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.Send(WindowRequest request)","SCT-GUI-013","Secondary Windows process routes request and returns"
 "avalonia/Watch/DesktopWindow.Actions.cs","ShareFileWatch.DesktopWindow.Pick(bool folders)","SCT-GUI-009","Native file and directory selection"
