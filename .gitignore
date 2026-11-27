@@ -14,4 +14,4 @@ cache.sqlite3*
 *.pubxml*
 .env*
 *.pfx
-*.pem
+*.pem/bin-single/

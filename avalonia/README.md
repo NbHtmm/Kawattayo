@@ -38,5 +38,9 @@ Avalonia の画面・ビルド設定は `avalonia/`、
 `-p:KawattayoUseNls=true` は比較用。標準設定では Windows の ICU を使います。
 NLS にしても Skia・HarfBuzz の DLL は不要にはなりません。
 
+EXE 1 個で配るビルドは `tool\build-single.bat` を実行します。
+成果物は `bin-single\Kawattayo.Avalonia.exe` です。通常の `bin` は上書きしません。
+単体版は Native AOT ではなく、内蔵した DLL を起動時に一時フォルダへ展開します。
+
 ローカル試験では日本語を含むパス、再帰照会、未読ツリー、履歴、SQLite 再読込を確認しています。
 実際の複数 PC 間の SMB と、実機のマルチモニター DPI、通知バナー・エクスプローラーとのクリップボード動作は環境ごとに確認してください。
