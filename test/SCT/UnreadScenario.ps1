@@ -1,5 +1,5 @@
 ﻿# Test the packaged GUI through Windows UI Automation. Only the fixture's settings are seeded.
-function Invoke-SctUnreadScenario([string]$Package, [string]$Work) {
+function Invoke-SctUnreadScenario([string]$Package, [string]$Work, [switch]$DatabaseOutage) {
     Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
     [void][IO.Directory]::CreateDirectory($Work)
     $app = Join-Path $Work 'app'
@@ -63,6 +63,10 @@ function Invoke-SctUnreadScenario([string]$Package, [string]$Work) {
         }
         $p.Dispose()
         $p = $null
+        if ($DatabaseOutage) {
+            Test-SctDatabaseUnavailable $exe (Join-Path $app 'cache.sqlite3')
+            [IO.File]::AppendAllText($evidence, "PASS locked SQLite was reported and startup declined." + [Environment]::NewLine)
+        }
         $p = Start-SctUnreadApp $exe
         Wait-SctRemainingUnread $p -AfterScan
         [IO.File]::AppendAllText($evidence, "PASS after restart and scan: only SCT-Beta remains

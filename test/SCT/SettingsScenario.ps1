@@ -89,3 +89,51 @@ public static class SctSettingsDialogNative
     $failure = [SctSettingsDialogNative]::Confirm($handle,$ProcessId)
     if ($failure) { throw "Could not dismiss the verified fixture message box: $failure." }
 }
+
+# Corruption and temporary sharing failure use disjoint fresh installations.
+function Invoke-SctDatabaseRecovery([string]$Package,[string]$Work) {
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+    [void][IO.Directory]::CreateDirectory($Work)
+    $corrupt = Join-Path $Work 'corrupt'
+    [IO.Compression.ZipFile]::ExtractToDirectory($Package,$corrupt)
+    $settings = Join-Path $corrupt 'settings.json'
+    $database = Join-Path $corrupt 'cache.sqlite3'
+    $invalid = 'This fixture is not a SQLite database.'
+    [IO.File]::WriteAllText($settings,'{"Version":1,"KeepInTray":false,"Items":[]}')
+    [IO.File]::WriteAllText($database,$invalid)
+    Confirm-SctDatabaseStartupFailure (Join-Path $corrupt 'かわったよ.exe')
+    if ([IO.File]::ReadAllText($database) -cne $invalid) {
+        throw 'Startup modified the original corrupted database.'
+    }
+    $recovery = Join-Path $Work 'temporary-outage'
+    Invoke-SctUnreadScenario $Package $recovery -DatabaseOutage
+    $steps = [IO.File]::ReadAllText((Join-Path $recovery 'observations.txt'))
+    [IO.File]::WriteAllText((Join-Path $Work 'observations.txt'),
+        "PASS corrupt SQLite refused without modifying the database bytes." + [Environment]::NewLine + $steps)
+}
+
+function Test-SctDatabaseUnavailable([string]$Exe,[string]$Database) {
+    # This fixture shut down normally after saving a known unread item.
+    $lock = [IO.File]::Open($Database,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try { Confirm-SctDatabaseStartupFailure $Exe }
+    finally { $lock.Dispose() }
+}
+
+function Confirm-SctDatabaseStartupFailure([string]$Exe) {
+    $process = Start-SctUnreadApp $Exe
+    try {
+        $dialog = Wait-SctUi 'SQLite startup failure message' {
+            if ($process.HasExited) { throw "GUI exited before showing the SQLite error: $($process.ExitCode)." }
+            $window = Get-SctOwnedWindow $process.Id 'かわったよ'
+            if ($window -and (Get-SctUiLabel $window 'フォルダ比較 DB: SQLite ' -Prefix)) { $window }
+        }
+        Confirm-SctNativeSettingsDialog $dialog $process.Id
+        if (!$process.WaitForExit(10000) -or $process.ExitCode -ne 1) {
+            throw 'An unavailable database must cause a nonzero startup failure.'
+        }
+    } finally {
+        try {
+            if (!$process.HasExited) { $process.Kill(); [void]$process.WaitForExit(5000) }
+        } finally { $process.Dispose() }
+    }
+}
