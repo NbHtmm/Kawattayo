@@ -23,4 +23,18 @@
     <Compile Include="../src/AppDefaults.cs;../src/FileProbe.cs;../src/FolderProbe.cs;../src/FileExclusions.cs;../src/State.cs;../src/StateStore.cs;../src/InventoryDb*.cs;../src/SettingsJsonContext.cs;../src/WindowsShell.cs" LinkBase="Shared" />
     <EmbeddedResource Include="../src/Assets/folder-bell.ico" LogicalName="folder-bell.ico" />
   </ItemGroup>
+  <!-- Copy only runtime files; keep existing settings and SQLite data in bin. -->
+  <Target Name="CopyKawattayoPortableFiles" AfterTargets="Publish" Condition="'$(KawattayoCopyToBin)' == 'true'">
+    <ItemGroup>
+      <KawattayoPortableDll Include="$(PublishDir)av_libglesv2.dll;$(PublishDir)libHarfBuzzSharp.dll;$(PublishDir)libSkiaSharp.dll" />
+    </ItemGroup>
+    <PropertyGroup>
+      <KawattayoBin>$(MSBuildProjectDirectory)/../bin</KawattayoBin>
+    </PropertyGroup>
+    <Error Condition="'$(PublishAot)' != 'true' or '$(KawattayoSmoke)' == 'true'" Text="The portable folder requires a non-test Native AOT publish." />
+    <Error Condition="!Exists('$(PublishDir)$(AssemblyName).exe') or !Exists('%(KawattayoPortableDll.Identity)')" Text="A required portable build output is missing. The bin folder was not updated." />
+    <Copy SourceFiles="@(KawattayoPortableDll)" DestinationFolder="$(KawattayoBin)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName).exe" DestinationFiles="$(KawattayoBin)/かわったよ.exe" SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="Executable: $(KawattayoBin)/かわったよ.exe" />
+  </Target>
 </Project>

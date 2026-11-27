@@ -33,7 +33,7 @@ Avalonia の画面・ビルド設定は `avalonia/`、
 .\tool\build.bat
 ```
 
-実行ファイルと DLL は bin に出力します。配布 ZIP だけ作るには .\tool\package-avalonia.ps1 を実行します。Visual Studio で開く場合は avalonia/Kawattayo.Avalonia.csproj を選んでください。ZIP の出力は `build/Kawattayo_v0.2.3_Avalonia_Windows_x64.zip` です。
+`build.bat` は .NET SDK を直接呼び出し、PowerShell スクリプトを実行しません。実行ファイルと DLL は `bin` に出力します。配布 ZIP の作成は別の操作です。PowerShell スクリプトの実行が許可されている開発環境で `.\tool\package-avalonia.ps1` を実行してください。Visual Studio で開く場合は avalonia/Kawattayo.Avalonia.csproj を選んでください。ZIP の出力は `build/Kawattayo_v0.2.3_Avalonia_Windows_x64.zip` です。
 `-p:KawattayoUseNls=true` は比較用。標準設定では Windows の ICU を使います。
 NLS にしても Skia・HarfBuzz の DLL は不要にはなりません。
 
