@@ -27,7 +27,7 @@ v0.1.3 以前の `cache.json` は読み込みません。実際の監視パス�
 ## 開発と検証
 
 Avalonia の画面・ビルド設定は `avalonia/`、
-ファイル照会・SQLite・設定の実装は `src/` にあります。
+監視・差分収集の判定は `src/Core/`、Windowsの照会・SQLite・設定は `src/Windows/` を参照してください。設計とテスト方法は [アーキテクチャ](../ARCHITECTURE.md) に記載しています。
 
 開発側では Windows x64、.NET 10 SDK、Visual Studio の C++ デスクトップ開発ツールが必要です。
 依存パッケージは NuGet.org から取得します。利用側に開発ツールは不要です。
