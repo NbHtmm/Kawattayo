@@ -5,6 +5,9 @@
     <Nullable>enable</Nullable>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(KawattayoSmoke)' == 'true'">
+    <DefineConstants>$(DefineConstants);KAWATTAYO_SMOKE</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Core/Kawattayo.Core.csproj" />
     <InternalsVisibleTo Include="Kawattayo.Avalonia" />

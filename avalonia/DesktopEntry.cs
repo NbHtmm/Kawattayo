@@ -56,6 +56,9 @@ internal sealed class DesktopApp : Application
 #if KAWATTAYO_SMOKE
     internal static string? SmokeFolder, SmokeReport;
 #endif
+    private static MonitorSession CreateMonitor(string directory) =>
+        new(StateStore.BesideExecutable(directory), new AvaloniaMonitorTimer(), new AvaloniaMonitorTimer());
+
     public override void Initialize() => Styles.Add(new FluentTheme());
 
     public override void OnFrameworkInitializationCompleted()
@@ -65,16 +68,16 @@ internal sealed class DesktopApp : Application
 #if KAWATTAYO_SMOKE
             if (SmokeFolder is { } fixture && SmokeReport is { } report)
             {
-                var monitor = new MonitorSession(StateStore.BesideExecutable(fixture));
+                var monitor = CreateMonitor(fixture);
                 monitor.State.KeepInTray = false;
-                var window = new DesktopWindow(monitor);
+                var window = new DesktopWindow(monitor, new WindowsAppPaths(fixture).CreateCheckpoints());
                 window.AttachSmoke(report, fixture);
                 desktop.MainWindow = window;
             }
             else
 #endif
             {
-                var window = new DesktopWindow(new MonitorSession(StateStore.BesideExecutable(AppContext.BaseDirectory)));
+                var window = new DesktopWindow(CreateMonitor(AppContext.BaseDirectory), new WindowsAppPaths(AppContext.BaseDirectory).CreateCheckpoints());
                 desktop.MainWindow = window;
                 var request = WindowActivation.FromArguments(desktop.Args ?? []);
                 window.ShowActivated = request != WindowRequest.Collector;

@@ -1,5 +1,3 @@
-using Avalonia.Threading;
-
 namespace ShareFileWatch;
 
 // 巡回・表示への通知・保存要求を調整する。観測の反映はUIスレッドに限定する。
@@ -9,23 +7,27 @@ internal sealed partial class MonitorSession
     private readonly AppState __state;
     private readonly WindowsWatchProbe __probe;
     private readonly SnapshotWriter __writer;
-    private readonly DispatcherTimer __pollTimer = new();
+    private readonly IMonitorTimer __pollTimer;
+    private readonly IMonitorTimer __scanFlush;
     private bool __closing;
     private DateTimeOffset? __lastPoll;
 
-    internal MonitorSession(StateStore store)
+    internal MonitorSession(StateStore store, IMonitorTimer pollTimer, IMonitorTimer flushTimer)
     {
         __store = store;
+        __pollTimer = pollTimer;
+        __scanFlush = flushTimer;
+        __scanFlush.Interval = TimeSpan.FromMilliseconds(150);
         __probe = new(store.IsInternalFile);
         (__state, StartupWarning) = store.Load();
         Hooks = new UpdateHooks(store.StorageDirectory);
         __writer = new(__state.CaptureForSave, __store.Save, UpdateStatus);
-        __pollTimer.Tick += async (_, _) => await Scan(automatic: true);
-        __scanFlush.Tick += (_, _) => FlushScanUpdates();
+        __pollTimer.Elapsed += async () => await Scan(automatic: true);
+        __scanFlush.Elapsed += () => FlushScanUpdates();
     }
 
     internal AppState State => __state;
-    internal StateStore Store => __store;
+    internal bool IsInternalFile(string path) => __store.IsInternalFile(path);
     internal UpdateHooks Hooks { get; }
     internal string? StartupWarning { get; }
     internal event Action<bool>? RowsChanged;

@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 namespace ShareFileWatch;
 
 // 巡回の起動と結果の取り込み。表示状態とキャッシュ更新の境界をここに置く。
@@ -10,7 +9,6 @@ internal sealed partial class MonitorSession
     private readonly HashSet<string> __activeScanRoots = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<CancellationTokenSource> __runningScans = [];
     // Shared by all roots, UI thread only. Never wait for a slow share before checkpointing.
-    private readonly DispatcherTimer __scanFlush = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private bool __rowsPending, __inboxPending, __scanNeedsSave;
     private readonly List<MonitorAlert> __alertsPending = [];
 #if KAWATTAYO_SMOKE

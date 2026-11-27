@@ -46,7 +46,7 @@ internal sealed partial class DesktopWindow
         try
         {
             string path = FileProbe.NormalizeFolder(input);
-            if (__monitor.Store.IsInternalFile(path)) return (input, false, "自身の設定・キャッシュは監視できません");
+            if (__monitor.IsInternalFile(path)) return (input, false, "自身の設定・キャッシュは監視できません");
             if (Directory.Exists(path)) return (path, true, null);
             if (File.Exists(path)) return (FileProbe.Normalize(path), false, null);
             return (input, false, "ファイルやフォルダが見つかりません");

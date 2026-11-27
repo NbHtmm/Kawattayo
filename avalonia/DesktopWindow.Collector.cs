@@ -16,7 +16,7 @@ internal sealed partial class DesktopWindow
         if (__closing) return;
         if (collector is null)
         {
-            collector = new(new WindowsAppPaths(__monitor.Store.StorageDirectory).CreateCheckpoints(), ShowFromTray);
+            collector = new(checkpoints, ShowFromTray);
             collector.Closed += (_, _) =>
             {
                 collector = null;

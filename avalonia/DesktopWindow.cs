@@ -15,6 +15,7 @@ namespace ShareFileWatch;
 internal sealed partial class DesktopWindow : Window
 {
     private readonly MonitorSession __monitor;
+    private readonly Checkpoints checkpoints;
     private readonly AppState __state;
     private readonly WinDesktop __native;
     private readonly ListBox __inbox = NewList(), __targets = NewList(), __history = NewList();
@@ -37,9 +38,10 @@ internal sealed partial class DesktopWindow : Window
 
     private sealed record TargetRowInfo(string State, DateTimeOffset? Checked, string Recursive, string Feed, string Elapsed, long? ElapsedMs);
 
-    internal DesktopWindow(MonitorSession monitor)
+    internal DesktopWindow(MonitorSession monitor, Checkpoints checkpoints)
     {
         __monitor = monitor;
+        this.checkpoints = checkpoints;
         __state = monitor.State;
         __native = new(this, ShowFromTray, () => _ = __monitor.Scan(), RequestExit, ShowCollector, OpenNotification, ActivateWindow);
         Title = DesktopIdentity.WindowTitle + " · Avalonia";
