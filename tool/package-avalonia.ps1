@@ -2,6 +2,7 @@
 param(
     [string]$PublishDirectory,
     [string]$AssetsFile,
+    [string]$OutputPath,
     [switch]$CopyToBin
 )
 Set-StrictMode -Version Latest
@@ -59,6 +60,7 @@ try {
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $output = Join-Path $root "build/Kawattayo_v${version}_Avalonia_Windows_x64.zip"
+    if ($OutputPath) { $output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath) }
     $temporary = $output + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
     try {
         $archive = [IO.Compression.ZipFile]::Open($temporary, [IO.Compression.ZipArchiveMode]::Create)
