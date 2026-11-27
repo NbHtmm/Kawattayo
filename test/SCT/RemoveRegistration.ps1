@@ -65,7 +65,7 @@ function Invoke-SctRemoveRegistration([string]$Package,[string]$Work) {
         'PASS: No retained both entries; Yes removed only its registration after restart. The other unread entry, both history rows and both original files were unchanged.')
 }
 
-function Invoke-SctRegistrationConfirmation($Settings,$Process,[string]$ButtonId) {
+function Invoke-SctRegistrationConfirmation($Settings,$Process,[string]$ButtonId,[string]$TargetName = 'remove-me.txt') {
     if (!('SctRegistrationDialog' -as [type])) {
         Add-Type @"
 using System;
@@ -91,7 +91,7 @@ public static class SctRegistrationDialog
 }
 "@
     }
-    $row = Wait-SctUi 'fixture removal row' { Get-SctUiLabel $Settings 'remove-me.txt' }
+    $row = Wait-SctUi 'fixture removal row' { Get-SctUiLabel $Settings $TargetName }
     Show-SctTargetContextMenu $Settings $row $Process.Id
     $element = [Windows.Automation.AutomationElement]
     $descendants = [Windows.Automation.TreeScope]::Descendants

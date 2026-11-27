@@ -1,5 +1,6 @@
 ﻿# A unique unpacked executable profile gets its own hook configuration and recorder.
-function Invoke-SctUpdateHook([string]$Package,[string]$Work,[switch]$Negative) {
+function Invoke-SctUpdateHook([string]$Package,[string]$Work,[switch]$Negative,[switch]$RemovedWhileWaiting) {
+    if ($Negative -and $RemovedWhileWaiting) { throw 'Select one hook scenario.' }
     Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
     [void][IO.Directory]::CreateDirectory($Work)
     $install = Join-Path $Work 'app'
@@ -42,12 +43,32 @@ function Invoke-SctUpdateHook([string]$Package,[string]$Work,[switch]$Negative) 
         $editors[1].GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue($fixedArgument)
         $anchor = Get-SctUiLabel $dialog '安定待ち（秒、0で待たない）'
         $spinner = [Windows.Automation.TreeWalker]::RawViewWalker.GetNextSibling($anchor)
-        $spinner.GetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern).SetValue($(if ($Negative) { 7 } else { 0 }))
+        $spinner.GetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern).SetValue($(if ($RemovedWhileWaiting) { 12 } elseif ($Negative) { 7 } else { 0 }))
         $ownedRule = $true # The fresh profile has one test-owned command, even if save is interrupted.
         Invoke-SctUiButton $dialog '保存'
         [void](Wait-SctUi 'saved test hook' { [IO.File]::Exists($localSettings) })
         if ([IO.File]::Exists($log)) { throw 'Hook ran before a file update.' }
         $settings.GetCurrentPattern([Windows.Automation.WindowPattern]::Pattern).Close()
+
+        if ($RemovedWhileWaiting) {
+            [IO.File]::WriteAllText($target,'test document updated before registration removal')
+            Invoke-SctHookScan $main 'queued hook before removal' { Get-SctUiLabel $main '未読 1 件' }
+            if ([IO.File]::Exists($log)) { throw 'The delayed hook ran before the test could remove the registration.' }
+            $settings = Open-SctPreferenceWindow $main $p
+            Invoke-SctRegistrationConfirmation $settings $p '6' 'SCT Hook Target'
+            [void](Wait-SctUi 'registration removed before due time' {
+                (Get-SctUiLabel $main '未読 0 件') -and !(Get-SctUiLabel $settings 'SCT Hook Target')
+            })
+            # Wait past the configured delay after removal without any clock assumptions.
+            Start-Sleep -Seconds 13
+            if ([IO.File]::Exists($log)) { throw 'The delayed hook still ran after removing its registration.' }
+            if ([IO.File]::ReadAllText($target) -cne 'test document updated before registration removal') {
+                throw 'Removing the registration unexpectedly changed the watched file.'
+            }
+            [IO.File]::WriteAllText((Join-Path $Work 'observations.txt'),
+                'PASS: removal canceled the delayed fixture hook; no launch or modification to the source.')
+            return
+        }
         if ($Negative) { Invoke-SctHookNegativeChecks $main $root $target $log }
         else {
             [IO.File]::WriteAllText($target,'this update is observable')
