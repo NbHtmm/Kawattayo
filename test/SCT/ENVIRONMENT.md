@@ -70,3 +70,9 @@
 通知バナーの表示と、試験画面だけを含む時刻付きの記録を用意した使い捨てセッションで、`pwsh -File test/SCT/Run-NotificationTiming.ps1 -Package "<配布ZIP>" -DedicatedSession` を使う。再通知オフ・オンで別の試験データを使い、各ファイルを20秒以内に2回更新する。スクリプトが出す更新時刻を目印に、20秒経過前と後の実バナー件数を記録する。未読のまま行う3回目の更新では、オフ0件・オン1件を期待する。表示時刻と件数の証跡は記録と一緒に残す。
 
 試験結果は `build/NOTIFY-001-*/environment-result.json`。バナー自体の観測は人が行い、スクリプトは更新時刻・未読件数・報告されたバナー件数を照合する。`-PrepareOnly` は2種類のデータの準備のみで、Windowsの通知には触れない。
+
+## SCT-SMB-001 の切断・再接続
+
+別々のWindows端末A・Bと、切断しても他の通信に影響しない試験専用の共有を用意する。共有の `Kawattayo-Sct\Disconnect` 直下には、普通の `disconnect-fixture.txt` を1件だけ置く。`pwsh -File test/SCT/Run-SmbReconnect.ps1 -Package "<配布ZIP>" -FixtureRoot "\\SERVER\SHARE\Kawattayo-Sct\Disconnect" -DedicatedShare` をAで実行する。
+
+スクリプトの案内でAだけを試験共有から切断し、アプリが「監視失敗」を出すが「消失」を出さないことを確認する。Bは接続したまま対象文書のサイズが変わるように更新し、その後にAを戻す。切断・ネットワーク設定の変更はスクリプトでは行わない。スクリプトは復旧後の対象の未読1件と履歴を検証する。証跡は `build/SMB-001-*/environment-result.json` と専用環境の操作記録。実共有に接続しない準備確認は `-DedicatedShare` の代わりに `-PrepareOnly`。
