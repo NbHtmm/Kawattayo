@@ -32,9 +32,14 @@ try {
         }
         throw "Package document not found: $id/$version/$name"
     }
+    $cliOutput = Join-Path $root ('build/cli-publish-' + [Guid]::NewGuid().ToString('N'))
+    dotnet publish cli/Kawattayo.Cli.csproj -c Release -r win-x64 -p:PublishAot=true -p:OptimizationPreference=Size -p:DebugType=None --source https://api.nuget.org/v3/index.json -o $cliOutput
+    if ($LASTEXITCODE) { throw 'CLI Native AOT publish failed.' }
     $netLicense = Join-Path $root 'avalonia/DotNet-LICENSE.txt'
     $entries = [ordered]@{
         'かわったよ.exe' = Join-Path $PublishDirectory 'Kawattayo.Avalonia.exe'
+        'Kawattayo-cli.exe' = Join-Path $cliOutput 'Kawattayo-cli.exe'
+        'CUIの使い方.md' = Join-Path $root 'cli/README.md'
         'av_libglesv2.dll' = Join-Path $PublishDirectory 'av_libglesv2.dll'
         'libHarfBuzzSharp.dll' = Join-Path $PublishDirectory 'libHarfBuzzSharp.dll'
         'libSkiaSharp.dll' = Join-Path $PublishDirectory 'libSkiaSharp.dll'
