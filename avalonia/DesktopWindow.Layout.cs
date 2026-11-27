@@ -55,7 +55,7 @@ internal sealed partial class DesktopWindow
     {
         __detailsToggle = Button("詳細 ▾", ToggleDetails);
         var actions = Bar(Button("すべて展開", ExpandAll), Button("すべて折りたたむ", CollapseAll),
-            Button("消失通知を消す", ClearDeleted), __detailsToggle);
+            Button("消失通知を消す", __monitor.ClearDeleted), __detailsToggle);
         actions.HorizontalAlignment = HorizontalAlignment.Right;
         var lower = new StackPanel();
         lower.Children.Add(__scope);

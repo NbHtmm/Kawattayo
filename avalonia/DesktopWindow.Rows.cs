@@ -64,9 +64,9 @@ internal sealed partial class DesktopWindow
                 Add("更新フック…", () => _ = ConfigureHook(target));
                 if (target.IsFolder)
                 {
-                    Add("再帰監視：オン", () => SetRecursive(target, true));
-                    Add("再帰監視：オフ", () => SetRecursive(target, false));
-                    Add("再帰監視：既定に戻す", () => SetRecursive(target, null));
+                    Add("再帰監視：オン", () => __monitor.SetTargetRecursion(target, true));
+                    Add("再帰監視：オフ", () => __monitor.SetTargetRecursion(target, false));
+                    Add("再帰監視：既定に戻す", () => __monitor.SetTargetRecursion(target, null));
                 }
                 Add("登録解除", () => Remove(SelectionOrRow().Where(r => r.Root).Select(r => r.Target).OfType<WatchItem>()));
             }

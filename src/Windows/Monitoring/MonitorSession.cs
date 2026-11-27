@@ -27,7 +27,6 @@ internal sealed partial class MonitorSession
     }
 
     internal AppState State => __state;
-    internal bool IsInternalFile(string path) => __store.IsInternalFile(path);
     internal UpdateHooks Hooks { get; }
     internal string? StartupWarning { get; }
     internal event Action<bool>? RowsChanged;

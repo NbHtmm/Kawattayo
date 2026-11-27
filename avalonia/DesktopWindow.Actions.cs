@@ -25,34 +25,8 @@ internal sealed partial class DesktopWindow
 
     private async Task Register(IEnumerable<string> paths)
     {
-        var requested = paths.ToArray();
-        var results = await Task.Run(() => requested.Select(CheckRegistration).ToArray());
-        if (__closing) return;
-        var known = __state.Items.Select(x => x.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        bool added = false;
-        foreach (var (path, folder, error) in results)
-        {
-            if (error is not null || !known.Add(path)) continue;
-            __state.Items.Add(new() { Path = path, IsFolder = folder, Recursive = folder && __state.RecursiveFolders != false });
-            added = true;
-        }
-        if (added) __monitor.UpdateSettings(true);
-        var errors = results.Where(x => x.Error is not null).Take(5).Select(x => x.Path + "：" + x.Error).ToArray();
-        if (errors.Length > 0) WinDesktop.Message(string.Join(Environment.NewLine, errors), Handle);
-    }
-
-    private (string Path, bool Folder, string? Error) CheckRegistration(string input)
-    {
-        try
-        {
-            string path = FileProbe.NormalizeFolder(input);
-            if (__monitor.IsInternalFile(path)) return (input, false, "自身の設定・キャッシュは監視できません");
-            if (Directory.Exists(path)) return (path, true, null);
-            if (File.Exists(path)) return (FileProbe.Normalize(path), false, null);
-            return (input, false, "ファイルやフォルダが見つかりません");
-        }
-        catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
-        { return (input, false, error.Message); }
+        var errors = await __monitor.Register(paths);
+        if (!__closing && errors.Length > 0) WinDesktop.Message(string.Join(Environment.NewLine, errors), Handle);
     }
 
     private async Task Rename(WatchItem item)
@@ -66,48 +40,20 @@ internal sealed partial class DesktopWindow
         dialog.Content = controls;
         dialog.Opened += (_, _) => input.Focus();
         input.KeyDown += (_, e) => { if (e.Key == Key.Enter) dialog.Close(true); };
-        if (await dialog.ShowDialog<bool>(__settingsWindow?.IsActive == true ? __settingsWindow : this) && __state.Items.Contains(item))
-        {
-            item.DisplayName = input.Text?.Trim() ?? "";
-            __monitor.UpdateSettings();
-        }
-    }
-
-    private void SetRecursive(WatchItem item, bool? overrideValue)
-    {
-        item.RecursiveOverride = overrideValue;
-        item.SetRecursive(overrideValue ?? (__state.RecursiveFolders != false));
-        __monitor.UpdateSettings(true);
+        if (await dialog.ShowDialog<bool>(__settingsWindow?.IsActive == true ? __settingsWindow : this))
+            __monitor.RenameTarget(item, input.Text);
     }
 
     private void Remove(IEnumerable<WatchItem> items)
     {
         var targets = items.DistinctBy(x => x.Id).ToArray();
-        if (targets.Length == 0 || !WinDesktop.Confirm($"{targets.Length}件の監視登録を解除しますか？ 実ファイルは削除しません。", Handle)) return;
-        foreach (var target in targets)
-        {
-            __monitor.Hooks.Disable(target.Id);
-            __state.Items.Remove(target);
-        }
-        __monitor.UpdateSettings(true);
+        if (targets.Length != 0 && WinDesktop.Confirm($"{targets.Length}件の監視登録を解除しますか？ 実ファイルは削除しません。", Handle))
+            __monitor.RemoveTargets(targets);
     }
 
     private void SetExclusions(string text)
     {
-        try
-        {
-            var rules = FileExclusions.Parse(text);
-            __state.ExcludedFilePatterns = rules;
-            foreach (var item in __state.Items)
-            {
-                if (!item.IsFolder && FileExclusions.Matches(item.Path, rules)) item.Acknowledge();
-                if (!item.IsFolder) continue;
-                foreach (var change in item.PendingFiles.Values.Where(x => x.Relative != "." &&
-                    FileExclusions.Matches(x.Relative, rules)).ToArray())
-                    item.AcknowledgeFile(change);
-            }
-            __monitor.UpdateSettings(true);
-        }
+        try { __monitor.SetExclusions(text); }
         catch (ArgumentException error) { WinDesktop.Message(error.Message, Handle); }
     }
 
@@ -131,16 +77,6 @@ internal sealed partial class DesktopWindow
     private void Acknowledge(IEnumerable<Row> rows)
     {
         foreach (var row in rows.ToArray()) CaptureAcknowledgement(row)();
-        __monitor.UpdateSettings();
-    }
-
-    private void ClearDeleted()
-    {
-        foreach (var item in __state.Items)
-        {
-            if (!item.IsFolder && item.LastChange == "消失") item.Acknowledge();
-            foreach (var change in item.PendingFiles.Values.Where(x => x.Kind == "消失").ToArray()) item.AcknowledgeFile(change);
-        }
         __monitor.UpdateSettings();
     }
 
