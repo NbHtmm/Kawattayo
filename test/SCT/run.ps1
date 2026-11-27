@@ -111,7 +111,7 @@ try {
             Write-Host "BLOCKED ${id}: $message"
         }
     }
-    foreach ($id in 'SCT-CLI-001','SCT-CLI-002','SCT-CLI-003','SCT-CLI-004','SCT-CLI-005','SCT-CLI-006','SCT-CLI-008','SCT-CLI-009') {
+    foreach ($id in 'SCT-CLI-001','SCT-CLI-002','SCT-CLI-003','SCT-CLI-004','SCT-CLI-005','SCT-CLI-006','SCT-CLI-008','SCT-CLI-009','SCT-CLI-010') {
         Invoke-Case $id { Invoke-CheckpointScenario -CaseId $id }
     }
 

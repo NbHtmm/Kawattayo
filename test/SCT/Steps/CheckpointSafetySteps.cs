@@ -235,6 +235,43 @@ public sealed class CheckpointSafetySteps
             result.Output.Split('\n').Select(line => line.Split('\t')[0]).Order());
     }
 
+    [Given("^同じ監視元の変更前と変更後に別々の基準を作る$")]
+    public async Task TwoRevisionsOfTree()
+    {
+        Write(Active, "initial");
+        _id = await Create("before", "before");
+        Directory.CreateDirectory(Path.Combine(_root, "試験 記録"));
+        Write(Path.Combine("試験 記録", "結果.txt"), "試験中");
+        Write(Active, "intermediate version");
+        _otherId = await Create("during", "during");
+    }
+
+    [When("^下位の試験記録と元文書を再更新して各基準から照会する$")]
+    public async Task QueryBothRevisions()
+    {
+        Write(Path.Combine("試験 記録", "結果.txt"), "試験完了：合格");
+        Write(Active, "final version with a third length");
+        _responses = [await Diff(_id, "diff-before"), await Diff(_otherId, "diff-during")];
+        _copy = await Collect(_destination, "collect-before");
+    }
+
+    [Then("^基準ごとに差分を分類し、収集先で下位階層と内容を保持する$")]
+    public void AssertRevisionsAndCollectedTree()
+    {
+        var nested = Path.Combine("試験 記録", "結果.txt");
+        AssertChanges(_responses[0], (Active, "updated"), (nested, "added"));
+        AssertChanges(_responses[1], (Active, "updated"), (nested, "updated"));
+
+        var result = Assert.IsType<CliResult>(_copy);
+        Assert.Equal(0, result.ExitCode);
+        using var doc = JsonDocument.Parse(result.Output);
+        Assert.Empty(doc.RootElement.GetProperty("unconfirmed").EnumerateArray());
+        Assert.Equal(new[] { Path.Combine(_destination, Active), Path.Combine(_destination, nested) }.Order(StringComparer.Ordinal),
+            doc.RootElement.GetProperty("files").EnumerateArray().Select(x => x.GetProperty("saved").GetString()).Order(StringComparer.Ordinal));
+        Assert.Equal("試験完了：合格", File.ReadAllText(Path.Combine(_destination, nested)));
+        Assert.Equal(File.ReadAllBytes(Path.Combine(_root, Active)), File.ReadAllBytes(Path.Combine(_destination, Active)));
+    }
+
     private void Write(string name, string contents) => File.WriteAllText(Path.Combine(_root, name), contents);
 
     private async Task<string> Create(string name, string label, params string[] options)
