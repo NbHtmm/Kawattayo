@@ -22,18 +22,7 @@ SCTは、**利用者が配布版で目的を達成できるか**を確かめる�
 
 ## SCT-CLI-001
 
-**目的:** 試験の前後で変わったログを、共有元へ書き戻さず別フォルダに集める。再実行しても以前の成果物を上書きしない。
-
-**前提:** 展開した `Kawattayo-cli.exe`、空の保存先、日本語と空白を含む監視フォルダ。その中に内容が `before` の `文書 01.txt` を置く。
-
-| 手順 | 期待結果 |
-|---|---|
-| `checkpoint create --name baseline --root "<監視先>"` を実行する | 終了コード0。後続の操作に使えるチェックポイントIDが返る |
-| 文書を `updated, longer content` に書き換え、`diff --checkpoint <ID> --json` を実行する | 終了コード0。結果は1件で、種別は `updated`、相対パスは `文書 01.txt` |
-| `collect --checkpoint <ID> --output "<保存先>" --json` を実行する | 終了コード0。保存先に更新後の内容を持つ文書ができる |
-| 同じ保存先でもう一度 `collect` する | 終了コード3。すでに保存したファイルの内容は変わらない |
-
-試験の証跡は終了コードと出力ログ、保存先の内容。現行の自動ケースは元ファイルの不変性までは個別に照合していない。
+自動試験仕様の正本は [Checkpoint.feature](Features/Checkpoint.feature)。各手順の実装は [CheckpointSteps.cs](Steps/CheckpointSteps.cs)。結果は `result.json`、手順単位の証跡は `cucumber.ndjson`、テスト結果は `sct.trx` に出る。
 
 ## SCT-GUI-001
 
