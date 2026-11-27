@@ -8,6 +8,7 @@
 . (Join-Path $PSScriptRoot 'RecursionScenario.ps1')
 . (Join-Path $PSScriptRoot 'PreferencePersistence.ps1')
 . (Join-Path $PSScriptRoot 'PickerRegistration.ps1')
+. (Join-Path $PSScriptRoot 'HookScenario.ps1')
 . (Join-Path $PSScriptRoot 'CollectorScenario.ps1')
 
 $ErrorActionPreference = 'Stop'
@@ -102,7 +103,7 @@ try {
         $desktopReady = $true
     } catch {
         $message = $_.Exception.Message
-        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-006','SCT-GUI-008','SCT-GUI-009','SCT-GUI-010','SCT-GUI-011','SCT-GUI-012','SCT-GUI-013','SCT-GUI-014','SCT-PERSIST-001','SCT-PERSIST-002','SCT-PERSIST-003') {
+        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-006','SCT-GUI-008','SCT-GUI-009','SCT-GUI-010','SCT-GUI-011','SCT-GUI-012','SCT-GUI-013','SCT-GUI-014','SCT-PERSIST-001','SCT-PERSIST-002','SCT-PERSIST-003','SCT-HOOK-001') {
             $results.Add(@{ id = $id; outcome = 'BLOCKED'; error = $message })
             Write-Host "BLOCKED ${id}: $message"
         }
@@ -140,6 +141,7 @@ try {
         Invoke-Case 'SCT-GUI-012' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-012') 'History' }
         Invoke-Case 'SCT-GUI-013' { Invoke-SctExistingInstance $package (Join-Path $out 'SCT-GUI-013') }
         Invoke-Case 'SCT-GUI-014' { Invoke-SctPreferencePersistence $package (Join-Path $out 'SCT-GUI-014') }
+        Invoke-Case 'SCT-HOOK-001' { Invoke-SctUpdateHook $package (Join-Path $out 'SCT-HOOK-001') }
         Invoke-Case 'SCT-PERSIST-001' { Invoke-SctSettingsRecovery $package (Join-Path $out 'SCT-PERSIST-001') }
         Invoke-Case 'SCT-PERSIST-002' { Invoke-SctDatabaseRecovery $package (Join-Path $out 'SCT-PERSIST-002') }
         Invoke-Case 'SCT-PERSIST-003' { Invoke-SctUnreadScenario -Package $package -Work (Join-Path $out 'SCT-PERSIST-003') -DatabaseWriteOutage }
@@ -202,6 +204,11 @@ try {
                 $result.testCode = 'test/SCT/PreferencePersistence.ps1'
                 $log = 'SCT-GUI-014/observations.txt'
                 if (Test-Path -LiteralPath (Join-Path $out $log)) { $result.evidence = @($log) }
+            }
+            if ($result.id -eq 'SCT-HOOK-001') {
+                $result.testCode = 'test/SCT/HookScenario.ps1'
+                $result.evidence = @('SCT-HOOK-001/observations.txt','SCT-HOOK-001/invocations.txt' |
+                    Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
             }
             if ($result.id -in 'SCT-PERSIST-001','SCT-PERSIST-002','SCT-PERSIST-003') {
                 $result.testCode = 'test/SCT/SettingsScenario.ps1'

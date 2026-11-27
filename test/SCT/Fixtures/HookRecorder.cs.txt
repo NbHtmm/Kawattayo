@@ -1,0 +1,15 @@
+using System;
+using System.IO;
+using System.Text;
+
+// Standalone SCT oracle. It never opens the monitored file or writes outside its own directory.
+internal static class HookRecorder
+{
+    private static int Main(string[] args)
+    {
+        var output = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "invocations.txt");
+        var record = Array.ConvertAll(args, value => Convert.ToBase64String(Encoding.UTF8.GetBytes(value)));
+        File.AppendAllText(output, string.Join("|", record) + Environment.NewLine, new UTF8Encoding(false));
+        return args.Length != 2 ? 64 : args[0] == "report-failure" ? 7 : 0;
+    }
+}
