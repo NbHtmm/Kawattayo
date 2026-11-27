@@ -29,8 +29,27 @@ internal static class HookTests
         if (File.Exists(output)) throw new InvalidOperationException("A stale update launched a hook.");
         using var loaded = new UpdateHooks(folder, config);
         if (loaded.Get(id, folder)?.Arguments.Length != 2) throw new InvalidOperationException("Hook rules did not persist.");
+        VerifyInvalidLocalStorage(folder);
         service.Set(id, null);
         if (service.Get(id, folder) is not null) throw new InvalidOperationException("Hook was not disabled.");
+    }
+
+    private static void VerifyInvalidLocalStorage(string folder)
+    {
+        const string invalid = "{ corrupt fixture";
+        var path = Path.Combine(folder, "invalid-hooks.json");
+        File.WriteAllText(path, invalid);
+        using var hooks = new UpdateHooks(folder, path);
+        var id = Guid.NewGuid();
+        if (!hooks.Status(id).StartsWith("フック設定を読めません", StringComparison.Ordinal))
+            throw new InvalidOperationException("Corrupt hooks must be reported.");
+        try { hooks.Set(id, null); }
+        catch (IOException)
+        {
+            if (File.ReadAllText(path) == invalid) return;
+            throw new InvalidOperationException("Corrupt hook settings were overwritten.");
+        }
+        throw new InvalidOperationException("Saving to corrupt hook settings must be refused.");
     }
 }
 #endif
