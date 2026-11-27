@@ -50,3 +50,11 @@
 ## SCT-GUI-015 のエクスプローラー操作
 
 使い捨ての対話セッションで `pwsh -File test/SCT/Run-ExplorerDrop.ps1 -Package "<配布ZIP>" -DedicatedSession`。案内に出る試験用フォルダをエクスプローラーで開き、指定のファイルとフォルダを実際にドラッグ＆ドロップする。同じ操作をもう一度行う。スクリプトは設定画面、登録件数、設定ファイルのID・絶対パス・種類、実ファイルの内容を1回目と2回目で照合する。通常の対象やクリップボードは使わない。記録は `build/EXPLORER-GUI-015-*/environment-result.json`。`-PrepareOnly` の場合、配布物を展開するが実際の操作は行わない。
+
+## SCT-GUI-007 の「ダウンロードして開く」
+
+**通常アカウントでは行わない。** 使い捨てのWindowsテストアカウントで、次の手順を実施する。
+
+1. `$id=[guid]::NewGuid()` を作り、`pwsh -File test/SCT/Run-DownloadAndOpen.ps1 -Package "<配布ZIP>" -RunId $id -PrepareOnly`。試験用のビューアーは渡された引数の記録だけを行う。既定の関連付けは変更しない。
+2. 検証アカウントに限り、Windowsの設定で準備した `SctTextViewer.exe` を `.txt` の関連アプリにする。この操作はスクリプトでは行わない。次に、同じZIPと同じ実行IDで `-PrepareOnly` を `-DedicatedSession` に替える。準備した実行ファイルに解決できなければ、アプリを起動せずに止まる。
+3. 指定の未読行を右クリックし「ダウンロードして開く」を選び、表示された空の試験用保存先を選ぶ。スクリプトはビューアーへ渡った先が元ファイルではなく保存先であること、元とコピーのSHA-256が一致することを確認する。記録先は `build/OPEN-GUI-007-*/environment-result.json`。
