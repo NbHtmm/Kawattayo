@@ -43,9 +43,9 @@ internal sealed partial class DesktopWindow : Window
         MinHeight = 340;
         using (var stream = GetType().Assembly.GetManifestResourceStream("folder-bell.ico"))
             if (stream is not null) Icon = new WindowIcon(stream);
-        __inbox.ItemTemplate = new FuncDataTemplate<Row>((row, _) => BuildRow(row, __inbox), false);
-        __targets.ItemTemplate = new FuncDataTemplate<Row>((row, _) => BuildRow(row, __targets), false);
-        __history.ItemTemplate = new FuncDataTemplate<Row>((row, _) => BuildRow(row, __history), false);
+        __inbox.ItemTemplate = CreateRowTemplate(__inbox);
+        __targets.ItemTemplate = CreateRowTemplate(__targets);
+        __history.ItemTemplate = CreateRowTemplate(__history);
         __tabs.Items.Add(new TabItem { Header = "未読", Content = BuildInbox() });
         __tabs.Items.Add(new TabItem { Header = "監視対象", Content = BuildTargets() });
         __tabs.Items.Add(new TabItem { Header = "設定", Content = BuildPreferences() });
@@ -102,6 +102,10 @@ internal sealed partial class DesktopWindow : Window
 
     private nint Handle => TryGetPlatformHandle()?.Handle ?? 0;
 
+    // Avalonia は行を再利用するとき、一時的にデータがない状態でもテンプレートを呼ぶ。
+    private FuncDataTemplate<Row> CreateRowTemplate(ListBox list) =>
+        new((row, _) => row is null ? null : BuildRow(row, list), false);
+
     private static ListBox NewList() => new() { SelectionMode = SelectionMode.Multiple };
     private static Button Button(string text, Action action)
     {
@@ -128,9 +132,15 @@ internal sealed partial class DesktopWindow : Window
         Button("名前", () => Sort(__inbox, 0)),
         Button("更新", () => Sort(__inbox, 1)),
         Button("すべて展開", ExpandAll),
-        Button("折りたたむ", () => { __expanded.Clear(); RefreshInbox(); }),
+        Button("すべて折りたたむ", CollapseAll),
         Button("確認済み", () => Acknowledge(Selected(__inbox))),
         Button("消失を消す", ClearDeleted)), __details);
+
+    private void CollapseAll()
+    {
+        __expanded.Clear();
+        RefreshInbox();
+    }
 
     private Control BuildTargets()
     {

@@ -1,6 +1,8 @@
 #if KAWATTAYO_SMOKE
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 
 namespace ShareFileWatch;
 
@@ -34,6 +36,16 @@ internal sealed partial class DesktopWindow
                 Require(__inbox.Items.Count == 1 && item.Unread == 1 && __history.Items.Count == 1, "未読表示と履歴");
                 ExpandAll();
                 Require(__inbox.Items.Count == 3 && __inbox.Items.Cast<Row>().Last().Path == sample, "再帰ツリーの展開");
+                await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+                var collapse = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "すべて折りたたむ"));
+                Require(Title == "かわったよ v0.2.2 · Avalonia", "タイトルのバージョン");
+                Require(collapse is { IsEffectivelyVisible: true, Bounds.Width: > 0, Bounds.Height: > 0 }
+                    && collapse.TranslatePoint(default, this) is { } location
+                    && location.X >= 0 && location.Y >= 0
+                    && location.X + collapse.Bounds.Width <= ClientSize.Width
+                    && location.Y + collapse.Bounds.Height <= ClientSize.Height, "最小幅の未読タブにボタンを表示");
+                collapse.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                Require(__expanded.Count == 0 && __inbox.Items.Count == 1, "ボタン操作で一括折りたたみ");
                 __tabs.SelectedIndex = 1;
                 RefreshTargets();
                 __targets.SelectedIndex = 0;
