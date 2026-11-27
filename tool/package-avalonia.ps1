@@ -1,4 +1,4 @@
-# Windows x64 用の Native AOT 配布 ZIP。利用者データや PDB は入れない。
+﻿# Windows x64 用の Native AOT 配布 ZIP。利用者データや PDB は入れない。
 param(
     [string]$PublishDirectory,
     [string]$AssetsFile,
