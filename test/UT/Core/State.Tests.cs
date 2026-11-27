@@ -193,6 +193,51 @@ public sealed class StateTests
         Assert.Equal(0, item.SavedUnreadWithoutDetails);
     }
 
+
+    [Fact]
+    public void AcknowledgeFile_LeavesOtherChildrenAndLegacyUnreadOutsideThatDetail()
+    {
+        var item = new WatchItem { IsFolder = true, Unread = 8, LatestFileWriteAt = s_now };
+        var left = new FileChange(Path.Combine("left", "same.txt"), "更新", s_now, Count: 3);
+        var right = new FileChange(Path.Combine("right", "same.txt"), "追加", s_now, Count: 2);
+        item.PendingFiles[left.Relative] = left;
+        item.PendingFiles[right.Relative] = right;
+        Assert.Equal(3, item.SavedUnreadWithoutDetails);
+
+        item.AcknowledgeFile(left with { Relative = Path.Combine("other", "same.txt") });
+        Assert.Equal(8, item.Unread);
+        Assert.Null(item.AcknowledgedAt);
+
+        item.AcknowledgeFile(left);
+        Assert.Equal(right, Assert.Single(item.PendingFiles).Value);
+        Assert.Equal(5, item.Unread);
+        Assert.Equal(3, item.SavedUnreadWithoutDetails);
+        Assert.Equal(s_now, item.LatestFileWriteAt);
+        Assert.NotNull(item.AcknowledgedAt);
+    }
+
+    [Fact]
+    public void ObserveFolder_SuppressionDoesNotLoseRealUpdatesDuringMixedChanges()
+    {
+        var item = new WatchItem { IsFolder = true, Path = "watched" };
+        var before = Snapshot(("deleted.txt", s_first), ("updated.txt", s_first));
+        item.ObserveFolder(new(before), s_now);
+        var after = Snapshot(("updated.txt", s_second), ("new.txt", s_first));
+        var observed = new List<(string Path, string Change)>();
+
+        item.ObserveFolder(new(after), s_now.AddSeconds(1), (path, kind) => observed.Add((path, kind)), notifyDeleted: false);
+
+        Assert.Same(after, item.Inventory);
+        Assert.Equal(2, item.Unread);
+        Assert.DoesNotContain("deleted.txt", item.PendingFiles.Keys);
+        Assert.Equal("更新", item.PendingFiles["updated.txt"].Kind);
+        Assert.Equal("追加", item.PendingFiles["new.txt"].Kind);
+        Assert.Equal(2, observed.Count);
+        Assert.DoesNotContain(observed, entry => entry.Change == "消失");
+        Assert.Null(item.ObserveFolder(new(after), s_now.AddSeconds(2)));
+        Assert.Equal(2, item.Unread);
+    }
+
     private static Dictionary<string, Fingerprint> Snapshot(params (string Path, Fingerprint Data)[] entries) =>
         entries.ToDictionary(entry => entry.Path, entry => entry.Data, StringComparer.OrdinalIgnoreCase);
 }
