@@ -1,4 +1,6 @@
-﻿. (Join-Path $PSScriptRoot 'FunctionTrace.ps1')
+﻿. (Join-Path $PSScriptRoot 'BoundaryTrace.ps1')
+. (Join-Path $PSScriptRoot '../SCT/CaseLedger.ps1')
+. (Join-Path $PSScriptRoot 'FunctionTrace.ps1')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $out = Join-Path $repo ('build/UT-' + [guid]::NewGuid().ToString('N'))
@@ -35,7 +37,15 @@ try {
     $resultPath = Join-Path $out 'result.trx'
     if (Test-Path -LiteralPath $resultPath) {
         [xml]$trx = Get-Content -LiteralPath $resultPath -Raw
-        Write-UtFunctionTrace $trx (Join-Path $out 'functions.csv') (Join-Path $PSScriptRoot 'function-assertions.csv') (Join-Path $out 'function-trace.csv')
+        $trace = @{
+            Trx = $trx
+            Inventory = Join-Path $out 'functions.csv'
+            Mapping = Join-Path $PSScriptRoot 'function-assertions.csv'
+            Destination = Join-Path $out 'function-trace.csv'
+            BoundaryMapping = Join-Path $PSScriptRoot 'function-boundaries.csv'
+            CaseLedger = Join-Path $PSScriptRoot '../SCT/CASES.md'
+        }
+        Write-UtFunctionTrace @trace
     }
     if ($status -eq 0) {
         if (!$trx) { throw 'UT result TRX missing.' }

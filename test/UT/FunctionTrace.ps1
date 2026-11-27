@@ -1,5 +1,5 @@
-﻿# Map reviewed behavioral assertions only, never equate executed lines with an asserted outcome.
-function Write-UtFunctionTrace($Trx,[string]$Inventory,[string]$Mapping,[string]$Destination) {
+# Map reviewed behavioral assertions only, never equate executed lines with an asserted outcome.
+function Write-UtFunctionTrace($Trx,[string]$Inventory,[string]$Mapping,[string]$Destination,[string]$BoundaryMapping,[string]$CaseLedger) {
     $functions = @(Import-Csv -LiteralPath $Inventory)
     $assertions = @(Import-Csv -LiteralPath $Mapping)
     if (!$functions.Count -or !$assertions.Count) { throw 'Expected a nonempty inventory and assertion map.' }
@@ -37,10 +37,12 @@ function Write-UtFunctionTrace($Trx,[string]$Inventory,[string]$Mapping,[string]
         $links[$key][$method] = [int]$link.minimum_cases
     }
 
+    $boundaries = Read-UtSctBoundaryLinks $inventoryKeys $links $BoundaryMapping $CaseLedger
     $rows = foreach ($function in $functions) {
         $key = "$($function.source)|$($function.signature)"
         $linkGroup = $links[$key]
-        $review = 'not_mapped'
+        $boundary = $boundaries[$key]
+        $review = if ($boundary) { 'sct_linked' } else { 'not_mapped' }
         $testNames = ''
         $passed = 0
         $executed = 0
@@ -62,11 +64,13 @@ function Write-UtFunctionTrace($Trx,[string]$Inventory,[string]$Mapping,[string]
         [pscustomobject]@{
             source = $function.source; line = $function.line; signature = $function.signature; expected_test_file = $function.test_file
             assertion_tests = $testNames; verdict = $review; referenced_cases = $executed; passed_referenced_cases = $passed
+            sct_case_ids = $boundary.case_ids; sct_scope = $boundary.scope
         }
     }
     $rows | Export-Csv -LiteralPath $Destination -NoTypeInformation -Encoding UTF8
     $passedLinks = @($rows | Where-Object verdict -eq 'mapped_passed').Count
     $unverified = @($rows | Where-Object verdict -eq 'mapped_not_verified').Count
     Write-Host "Reviewed UT assertions verified: $passedLinks/$($rows.Count) declarations. See function-trace.csv."
+    Write-Host "External-boundary links (not UT passes): $($boundaries.Count); remaining declarations without links: $(@($rows | Where-Object verdict -eq 'not_mapped').Count)."
     if ($unverified) { throw "$unverified mapped UT declarations lack passing results for their referenced cases." }
 }
