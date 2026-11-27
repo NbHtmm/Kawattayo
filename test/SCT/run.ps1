@@ -1,4 +1,5 @@
-﻿. (Join-Path $PSScriptRoot 'Evidence.ps1')
+﻿. (Join-Path $PSScriptRoot 'CaseLedger.ps1')
+. (Join-Path $PSScriptRoot 'Evidence.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSetup.ps1')
 . (Join-Path $PSScriptRoot 'UnreadScenario.ps1')
 . (Join-Path $PSScriptRoot 'MonitorLifecycle.ps1')
@@ -21,6 +22,7 @@ $artifact = $null
 $runnerRevision = @{ commit = $null; hasLocalChanges = $null }
 $packageSource = if ($package) { 'provided' } else { 'built-in-this-run' }
 $status = 0
+$ledger = $null
 
 function Invoke-Case([string]$id, [scriptblock]$test) {
     try {
@@ -64,6 +66,7 @@ function Invoke-CheckpointScenario {
 
 try {
     Push-Location $repo
+    $ledger = Read-SctCaseLedger (Join-Path $PSScriptRoot 'CASES.md')
     # 提供されたZIPには、試験コードのコミットを製品のコミットとして帰属させない。
     if (Get-Command git -ErrorAction SilentlyContinue) {
         $revision = git rev-parse --verify HEAD 2>$null
@@ -147,6 +150,7 @@ try {
         Invoke-Case 'SCT-PERSIST-002' { Invoke-SctDatabaseRecovery $package (Join-Path $out 'SCT-PERSIST-002') }
         Invoke-Case 'SCT-PERSIST-003' { Invoke-SctUnreadScenario -Package $package -Work (Join-Path $out 'SCT-PERSIST-003') -DatabaseWriteOutage }
     }
+    Assert-SctRunMatchesLedger $ledger $results
     if ($results.Where({ $_.outcome -ne 'PASS' }).Count -gt 0) { $status = 1 }
 } catch {
     $results.Add(@{ id = 'SCT-SETUP'; outcome = 'FAIL'; error = $_.Exception.Message })
@@ -224,6 +228,8 @@ try {
         schemaVersion = 1
         runnerRevision = $runnerRevision
         artifact = $artifact
+        planned = @($ledger.Keys | Where-Object { $ledger[$_] -eq '予定' } | Sort-Object)
+        environmentRequired = @($ledger.Keys | Where-Object { $ledger[$_] -eq '要環境' } | Sort-Object)
         results = @($results.ToArray())
     }
     $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $out 'result.json') -Encoding UTF8
