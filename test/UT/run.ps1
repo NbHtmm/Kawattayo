@@ -27,6 +27,8 @@ $mapped = @($mappings | Where-Object { $_.status -eq 'mapped' }).Count
 Write-Host "Source/test files: $mapped/$(@($mappings).Count) mapped (not function coverage)."
 Push-Location $repo
 try {
+    dotnet run --project test/tools/UtInventory -c Release -- (Join-Path $out 'source-map.csv') (Join-Path $out 'functions.csv') $repo
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to generate the source function inventory.' }
     dotnet test test/UT/Kawattayo.Core.Tests.csproj -c Release -p:RestoreLockedMode=true -p:UseSharedCompilation=false --settings test/UT/coverage.runsettings --results-directory $out --logger 'trx;LogFileName=result.trx' --collect 'XPlat Code Coverage'
     $status = $LASTEXITCODE
     if ($status -eq 0) {
