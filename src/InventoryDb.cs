@@ -13,6 +13,7 @@ internal sealed partial class InventoryDb : IDisposable
         try
         {
             Check(sqlite3_open_v2(file, out db, create ? 6 : 2, 0));
+            Exec("PRAGMA busy_timeout=3000");
             if (create) Exec("CREATE TABLE IF NOT EXISTS snapshots(id TEXT PRIMARY KEY, n INTEGER NOT NULL);" +
                 "CREATE TABLE IF NOT EXISTS parts(id TEXT, hash TEXT, PRIMARY KEY(id,hash)) WITHOUT ROWID;" +
                 "CREATE TABLE IF NOT EXISTS files(hash TEXT,path TEXT,modified INTEGER,created INTEGER,bytes INTEGER, PRIMARY KEY(hash,path)) WITHOUT ROWID;");
