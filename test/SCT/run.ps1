@@ -1,5 +1,6 @@
 ﻿. (Join-Path $PSScriptRoot 'Evidence.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSetup.ps1')
+. (Join-Path $PSScriptRoot 'UnreadScenario.ps1')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -81,8 +82,10 @@ try {
         $desktopReady = $true
     } catch {
         $message = $_.Exception.Message
-        $results.Add(@{ id = 'SCT-GUI-001'; outcome = 'BLOCKED'; error = $message })
-        Write-Host "BLOCKED SCT-GUI-001: $message"
+        foreach ($id in 'SCT-GUI-001','SCT-GUI-002') {
+            $results.Add(@{ id = $id; outcome = 'BLOCKED'; error = $message })
+            Write-Host "BLOCKED ${id}: $message"
+        }
     }
     Invoke-Case 'SCT-CLI-001' { Invoke-CheckpointScenario }
 
@@ -104,6 +107,7 @@ try {
                 $p.Dispose()
             }
         }
+        Invoke-Case 'SCT-GUI-002' { Invoke-SctUnreadScenario -Package $package -Work (Join-Path $out 'unread') }
     }
     if ($results.Where({ $_.outcome -ne 'PASS' }).Count -gt 0) { $status = 1 }
 } catch {
@@ -118,6 +122,11 @@ try {
             $result.testCode = 'test/SCT/Steps/CheckpointSteps.cs'
             $result.evidence = @('sct.trx', 'cucumber.ndjson' | Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
         } elseif ($result.id -ne 'SCT-SETUP') {
+            if ($result.id -eq 'SCT-GUI-002') {
+                $result.testCode = 'test/SCT/UnreadScenario.ps1'
+                $result.evidence = @('unread/observations.txt', 'unread/ui-on-failure.txt' |
+                    Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
+            }
             $result.specification = 'test/SCT/SPEC.md#' + $result.id.ToLowerInvariant()
         }
     }
