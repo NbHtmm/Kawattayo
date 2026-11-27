@@ -1,0 +1,8 @@
+<Project>
+  <!-- 配布で使うトリマー・AOTパックはSDK依存。参照先も含め、開発用の固定ロックとは分離する。 -->
+  <PropertyGroup Condition="'$(KawattayoLocalRestore)' == 'true'">
+    <NuGetLockFilePath>$(MSBuildProjectDirectory)/obj/packages.sdk.lock.json</NuGetLockFilePath>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>false</RestoreLockedMode>
+  </PropertyGroup>
+</Project>

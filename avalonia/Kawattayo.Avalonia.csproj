@@ -11,13 +11,6 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
-  <!-- Native AOT packs follow the installed SDK. Keep the machine-specific
-       restore lock in obj, leaving the tracked reference lock untouched. -->
-  <PropertyGroup Condition="'$(KawattayoLocalRestore)' == 'true'">
-    <NuGetLockFilePath>$(MSBuildProjectDirectory)/obj/packages.sdk.lock.json</NuGetLockFilePath>
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <RestoreLockedMode>false</RestoreLockedMode>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(KawattayoSmoke)' == 'true'">
     <DefineConstants>$(DefineConstants);KAWATTAYO_SMOKE</DefineConstants>
   </PropertyGroup>

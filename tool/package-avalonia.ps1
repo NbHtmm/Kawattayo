@@ -33,7 +33,7 @@ try {
         throw "Package document not found: $id/$version/$name"
     }
     $cliOutput = Join-Path $root ('build/cli-publish-' + [Guid]::NewGuid().ToString('N'))
-    dotnet publish cli/Kawattayo.Cli.csproj -c Release -r win-x64 -p:PublishAot=true -p:OptimizationPreference=Size -p:DebugType=None --source https://api.nuget.org/v3/index.json -o $cliOutput
+    dotnet publish cli/Kawattayo.Cli.csproj -c Release -r win-x64 -p:KawattayoLocalRestore=true -p:PublishAot=true -p:OptimizationPreference=Size -p:DebugType=None --source https://api.nuget.org/v3/index.json -o $cliOutput
     if ($LASTEXITCODE) { throw 'CLI Native AOT publish failed.' }
     $netLicense = Join-Path $root 'avalonia/DotNet-LICENSE.txt'
     $entries = [ordered]@{
