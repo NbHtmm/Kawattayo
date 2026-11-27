@@ -12,5 +12,6 @@
     <ProjectReference Include="../Core/Kawattayo.Core.csproj" />
     <InternalsVisibleTo Include="Kawattayo.Avalonia" />
     <InternalsVisibleTo Include="Kawattayo-cli" />
+    <InternalsVisibleTo Include="Kawattayo.Core.Tests" />
   </ItemGroup>
 </Project>
