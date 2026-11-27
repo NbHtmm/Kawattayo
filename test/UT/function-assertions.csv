@@ -88,3 +88,8 @@ cli/Program.cs,"Program.Options.Options(string[] args, string[] fields, string[]
 "src/Core/Collection/Checkpoints.cs","ShareFileWatch.Checkpoints.Compare(string id, CancellationToken stop)","CheckpointsTests","Compare_RootFailureReportsUnconfirmedAndDoesNotReplaceTheBaseline","1"
 "src/Core/Collection/Checkpoints.cs","ShareFileWatch.Checkpoints.IsUnconfirmed(string file, Dictionary<string, string> errors)","CheckpointsTests","Compare_UnconfirmedFolderDoesNotHideDeletionFromSimilarlyNamedSibling","1"
 "src/Core/Collection/Checkpoints.cs","ShareFileWatch.Checkpoints.Collect(CheckpointInfo info, IEnumerable<CheckpointDifference> changes, string output, CancellationToken stop)","CheckpointsTests","Collect_PassesSelectedFileFingerprintRootAndCancellationToSaver","1"
+"cli/Program.cs","Program.Run(string[] args, Checkpoints points, CancellationToken stop, TextWriter outputWriter, Func<Stream> openJsonOutput)","ProgramTests","Run_CreateAndListUseTextOutputAndPreserveTheScanPolicy","1"
+"cli/Program.cs","Program.Run(string[] args, Checkpoints points, CancellationToken stop, TextWriter outputWriter, Func<Stream> openJsonOutput)","ProgramTests","Run_DiffWritesOneUtf8JsonLineAndReportsUnconfirmed","2"
+"cli/Program.cs","Program.Run(string[] args, Checkpoints points, CancellationToken stop, TextWriter outputWriter, Func<Stream> openJsonOutput)","ProgramTests","Run_CollectDistinguishesCopyFailureFromUnconfirmed","3"
+"cli/Program.cs","Program.Resolve(CheckpointInfo[] items, string token)","ProgramTests","Resolve_PrefersExactIdOverAmbiguousNameAndAcceptsUniqueNameIgnoringCase","1"
+"cli/Program.cs","Program.Json(Func<Stream> openOutput, Action<Utf8JsonWriter> write)","ProgramTests","Run_DiffWritesOneUtf8JsonLineAndReportsUnconfirmed","2"

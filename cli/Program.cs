@@ -20,7 +20,7 @@ internal static class Program
         using var cancel = new CancellationTokenSource();
         ConsoleCancelEventHandler onCancel = (_, e) => { e.Cancel = true; cancel.Cancel(); };
         Console.CancelKeyPress += onCancel;
-        try { return Run(args, new WindowsAppPaths(AppContext.BaseDirectory).CreateCheckpoints(), cancel.Token); }
+        try { return Run(args, new WindowsAppPaths(AppContext.BaseDirectory).CreateCheckpoints(), cancel.Token, Console.Out, Console.OpenStandardOutput); }
         catch (OperationCanceledException) { return 130; }
         catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
@@ -28,47 +28,47 @@ internal static class Program
         finally { Console.CancelKeyPress -= onCancel; }
     }
 
-    private static int Run(string[] args, Checkpoints points, CancellationToken stop)
+    internal static int Run(string[] args, Checkpoints points, CancellationToken stop, TextWriter outputWriter, Func<Stream> openJsonOutput)
     {
         if (args is ["checkpoint", "list"])
         {
-            foreach (var item in points.List()) Console.WriteLine($"{item.Id}\t{item.Name} ｜ {item.At.ToLocalTime():yyyy/MM/dd HH:mm:ss} ｜ {item.Root}");
+            foreach (var item in points.List()) outputWriter.WriteLine($"{item.Id}\t{item.Name} ｜ {item.At.ToLocalTime():yyyy/MM/dd HH:mm:ss} ｜ {item.Root}");
             return 0;
         }
         if (args is ["checkpoint", "create", .. var fields])
         {
             var o = new Options(fields, ["--name", "--root", "--exclude"], ["--no-recursive"]);
             var point = points.Create(o.One("--name"), o.One("--root"), !o.Has("--no-recursive"), string.Join('\n', o.All("--exclude")), stop);
-            Console.WriteLine(point.Id);
+            outputWriter.WriteLine(point.Id);
             return 0;
         }
         if (args[0] is not ("diff" or "collect")) throw new ArgumentException(Usage);
         bool collect = args[0] == "collect";
         var options = new Options(args[1..], collect ? ["--checkpoint", "--output"] : ["--checkpoint"], ["--json"]);
         string? output = collect ? options.One("--output") : null;
-        string id = Resolve(points, options.One("--checkpoint"));
+        string token = options.One("--checkpoint");
+        string id = Resolve(points.List(), token);
         var result = points.Compare(id, stop);
         var unknown = result.Changes.Where(x => x.Kind == DifferenceKind.Unconfirmed).ToArray();
         if (!collect)
         {
-            if (options.Has("--json")) Json(w => Changes(w, result.Changes));
-            else foreach (var change in result.Changes) Console.WriteLine(Describe(change));
+            if (options.Has("--json")) Json(openJsonOutput, w => Changes(w, result.Changes));
+            else foreach (var change in result.Changes) outputWriter.WriteLine(Describe(change));
             return unknown.Length == 0 ? 0 : 3;
         }
         var copies = points.Collect(result.Info, result.Changes, output!, stop);
         stop.ThrowIfCancellationRequested();
-        if (options.Has("--json")) Json(w => Copies(w, copies, unknown));
+        if (options.Has("--json")) Json(openJsonOutput, w => Copies(w, copies, unknown));
         else
         {
-            foreach (var copy in copies) Console.WriteLine(copy.Saved ?? $"未保存：{copy.Source} ｜ {copy.Error}");
-            foreach (var skipped in unknown) Console.WriteLine(Describe(skipped));
+            foreach (var copy in copies) outputWriter.WriteLine(copy.Saved ?? $"未保存：{copy.Source} ｜ {copy.Error}");
+            foreach (var skipped in unknown) outputWriter.WriteLine(Describe(skipped));
         }
         return unknown.Length == 0 && copies.All(x => x.Saved is not null) ? 0 : 3;
     }
 
-    private static string Resolve(Checkpoints points, string token)
+    internal static string Resolve(CheckpointInfo[] items, string token)
     {
-        var items = points.List();
         if (items.FirstOrDefault(x => string.Equals(x.Id, token, StringComparison.OrdinalIgnoreCase)) is { } id) return id.Id;
         var names = items.Where(x => string.Equals(x.Name, token, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
         return names.Length switch
@@ -121,9 +121,9 @@ internal static class Program
         writer.WriteEndObject();
     }
 
-    private static void Json(Action<Utf8JsonWriter> write)
+    private static void Json(Func<Stream> openOutput, Action<Utf8JsonWriter> write)
     {
-        using var stdout = Console.OpenStandardOutput();
+        using var stdout = openOutput();
         using (var writer = new Utf8JsonWriter(stdout)) write(writer);
         stdout.WriteByte((byte)'\n');
     }
