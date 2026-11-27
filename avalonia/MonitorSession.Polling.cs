@@ -67,7 +67,7 @@ internal sealed partial class MonitorSession
         }
         var groups = __state.Items
             .Where(x => (x.IsFolder || !FileExclusions.Matches(x.Path, exclusions)) && Due(x))
-            .Select(x => new ScanTarget(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision, exclusions, __state.WatchDirectoryTime, low, feeds?.GetValueOrDefault(x.Id)))
+            .Select(x => new ScanTarget(new(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision, exclusions, __state.WatchDirectoryTime), low, feeds?.GetValueOrDefault(x.Id)))
             .GroupBy(x => Path.TrimEndingDirectorySeparator(Path.GetPathRoot(x.Path)!), StringComparer.OrdinalIgnoreCase)
             .Where(x => __activeScanRoots.Add(x.Key))
             .ToArray();
@@ -145,7 +145,7 @@ internal sealed partial class MonitorSession
             var baseline = item.Inventory;
             var priorExclusions = item.InventoryExclusions;
             var (stamp, paths) = CaptureFeedDelta(target, baseline);
-            var result = await Task.Run(() => ProbeTarget(target, cancellation, baseline, paths, priorExclusions));
+            var result = await Task.Run(() => __probe.Read(target.Request, cancellation, baseline, paths, priorExclusions));
 #if KAWATTAYO_SMOKE
             BeforeApplyForTest?.Invoke();
 #endif
@@ -174,7 +174,7 @@ internal sealed partial class MonitorSession
         return (feed?.Stamp(target.IsFolder, target.Path) ?? 0, null);
     }
 
-    private void UpdateCheckpoint(ScanTarget target, ScanResult result, long stamp)
+    private void UpdateCheckpoint(ScanTarget target, WatchObservation result, long stamp)
     {
         bool success = target.IsFolder ? result.Folder?.Files is not null : result.File?.State != ProbeState.Unavailable;
         if (!target.Low)
@@ -191,120 +191,29 @@ internal sealed partial class MonitorSession
     private bool CanApplyScan(int generation) =>
         !__closing && !__state.Paused && generation == __scanGeneration;
 
-    private ScanResult ProbeTarget(ScanTarget target, CancellationToken cancellation = default, Dictionary<string,Fingerprint>? baseline = null, string[]? paths = null, string[]? priorExclusions = null)
+    private sealed record ScanTarget(WatchScanRequest Request, bool Low, ChangeFeed? Feed)
     {
-        FolderResult? folder = null;
-        ProbeResult? file = null;
-        if (target.IsFolder)
-        {
-            bool Excluded(string path) => FileExclusions.Matches(path,target.Exclusions) || __store.IsInternalFile(path);
-            folder = (paths != null && baseline != null ? FolderProbe.ReadChanges(target.Path,target.Recursive,baseline,paths,Excluded,cancellation)
-                : FolderProbe.Read(target.Path,target.Recursive,Excluded,cancellation)) with { Exclusions = target.Exclusions };
-            // Saving the app's own cache changes its parent directory's timestamp.
-            if (folder.Files != null && target.WatchTime && !__store.IsInternalFile(Path.Combine(target.Path, AppDefaults.SettingsFileName)))
-            {
-                try { folder = folder with { DirectoryStamp = Directory.GetLastWriteTimeUtc(target.Path).ToFileTimeUtc() }; }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { folder = new(null, ex.Message); }
-            }
-        }
-        else if (__store.IsInternalFile(target.Path))
-        {
-            file = new(ProbeState.Unavailable, Error: "アプリ自身のキャッシュは監視できません");
-        }
-        else
-        {
-            file = FileProbe.Read(target.Path);
-        }
-        var at = DateTimeOffset.Now;
-        List<FileChange>? prepared = null;
-        if (baseline is not null && folder?.Files is { } files)
-        {
-            bool scopeChanged = !FileExclusions.Same(priorExclusions, target.Exclusions);
-            prepared = FolderComparison.Compare(baseline, files, at,
-                scopeChanged ? priorExclusions : null, scopeChanged ? target.Exclusions : null);
-        }
-        return new(target.Id, target.Revision, file, folder, at, prepared);
+        internal Guid Id => Request.Id;
+        internal string Path => Request.Path;
+        internal bool IsFolder => Request.IsFolder;
+        internal int Revision => Request.Revision;
     }
 
-    private sealed record ScanTarget(Guid Id, string Path, bool IsFolder, bool Recursive, int Revision, string[] Exclusions, bool WatchTime, bool Low = false, ChangeFeed? Feed = null);
-    private sealed record ScanResult(Guid Id, int Revision, ProbeResult? File, FolderResult? Folder, DateTimeOffset At, List<FileChange>? PreparedChanges);
-    private void ApplyResult(ScanResult result, HashSet<string> seenPaths)
+    private void ApplyResult(WatchObservation result, HashSet<string> seenPaths)
     {
-        // 登録解除済み、または監視範囲変更前の結果を反映しない。
         var item = __state.Items.Find(x => x.Id == result.Id);
-        if (item is null || item.Revision != result.Revision)
-        {
-            return;
-        }
+        var hook = item is null ? null : Hooks.Get(item.Id, item.Path);
+        if (MonitoringReducer.Apply(__state, result, seenPaths, hook is not null) is not { } outcome) return;
 
-        var pending = __state.RenotifyUnread ? null : new Lazy<PendingPathLookup>(() => new(__state.Items));
-        var alerts = new List<MonitorAlert>();
-        bool changed = false;
-        var baselineBefore = item.Baseline;
-        var inventoryBefore = item.Inventory;
-        var stampBefore = item.DirectoryStamp;
-        var inventoryExclusionsBefore = item.InventoryExclusions;
-        var lastWriteBefore = item.LatestFileWriteAt;
-        var hook = Hooks.Get(item.Id, item.Path);
-        void Record(string path, string kind)
-        {
-            changed = true;
-            if (hook is not null && kind is ("追加" or "更新") && Path.GetFileName(path) != ".")
-            {
-                var expected = result.Folder?.Files?.GetValueOrDefault(Path.GetRelativePath(item.Path, path))
-                    ?? result.File?.Fingerprint;
-                if (expected is not null) Hooks.Enqueue(item.Id, hook, path, expected);
-            }
-            if (Path.GetFileName(path) == ".") path = Path.GetDirectoryName(path)!;
-            // 再通知が有効なら既存の未読集合を作らず、同一巡回内の重複だけを抑える。
-            RecordDetectedChange(path, kind, result.At, pending?.Value, seenPaths, alerts);
-        }
-
-        if (result.Folder is { } folder)
-        {
-            item.ObserveFolder(folder, result.At, Record, __state.NotifyDeleted, result.PreparedChanges);
-        }
-        else
-        {
-            item.Observe(result.File!, result.At, Record, __state.NotifyDeleted);
-        }
+        if (hook is not null)
+            foreach (var file in outcome.FileUpdates)
+                Hooks.Enqueue(result.Id, hook, file.Path, file.Expected);
 
         __lastPoll = result.At;
-        bool exclusionScopeChanged = !FileExclusions.Same(inventoryExclusionsBefore, item.InventoryExclusions ?? []);
-        if (changed || inventoryBefore != item.Inventory || stampBefore != item.DirectoryStamp || exclusionScopeChanged || item.Baseline != baselineBefore ||
-            item.LatestFileWriteAt != lastWriteBefore)
-        {
-            __scanNeedsSave = true;
-        }
+        __scanNeedsSave |= outcome.NeedsSave;
         __rowsPending = true;
-        __inboxPending |= changed;
-
-        __alertsPending.AddRange(alerts);
+        __inboxPending |= outcome.UnreadChanged;
+        __alertsPending.AddRange(outcome.Alerts);
         if (!__scanFlush.IsEnabled) __scanFlush.Start();
     }
-
-    /// @brief 同じ巡回で重複したパスを除き、履歴と初回の未読通知に反映する。
-    private void RecordDetectedChange(string path, string kind, DateTimeOffset detectedAt,
-        PendingPathLookup? previouslyUnread, HashSet<string> detected, List<MonitorAlert> alerts)
-    {
-        // 同一巡回で重複して検知したパスを履歴や通知に二重計上しない。
-        if (!detected.Add(path))
-        {
-            return;
-        }
-
-        // 再通知を抑止する設定でも、未読・履歴の記録自体は省略しない。
-        if (previouslyUnread?.Contains(path) != true)
-        {
-            alerts.Add(new(path, $"{DisplayName(path)}：{kind}"));
-        }
-
-        __state.History.Enqueue(new(detectedAt, path, kind));
-        // 履歴の保持上限を超えたら、最も古い項目を取り除く。
-        if (__state.History.Count > AppDefaults.HistoryLimit)
-        {
-            __state.History.Dequeue();
-        }
-    }
-
 }

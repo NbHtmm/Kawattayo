@@ -2,13 +2,12 @@ using Avalonia.Threading;
 
 namespace ShareFileWatch;
 
-internal sealed record MonitorAlert(string Path, string Label);
-
 // 巡回・表示への通知・保存要求を調整する。観測の反映はUIスレッドに限定する。
 internal sealed partial class MonitorSession
 {
     private readonly StateStore __store;
     private readonly AppState __state;
+    private readonly WindowsWatchProbe __probe;
     private readonly SnapshotWriter __writer;
     private readonly DispatcherTimer __pollTimer = new();
     private bool __closing;
@@ -17,8 +16,9 @@ internal sealed partial class MonitorSession
     internal MonitorSession(StateStore store)
     {
         __store = store;
-        Hooks = new UpdateHooks(store.StorageDirectory);
+        __probe = new(store.IsInternalFile);
         (__state, StartupWarning) = store.Load();
+        Hooks = new UpdateHooks(store.StorageDirectory);
         __writer = new(__state.CaptureForSave, __store.Save, UpdateStatus);
         __pollTimer.Tick += async (_, _) => await Scan(automatic: true);
         __scanFlush.Tick += (_, _) => FlushScanUpdates();
@@ -37,7 +37,6 @@ internal sealed partial class MonitorSession
             __state.Items.Count == 0 ? "監視対象を追加してください" : __lastPoll is { } at ? $"最終巡回 {at:HH:mm:ss}" : "監視中");
 
     private void UpdateStatus() => ProgressChanged?.Invoke();
-    private static string DisplayName(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } name ? name : path;
 
     // 監視条件の変更は、すでに待機中の照会にも適用する。旧条件で読んだ結果は捨てる。
     internal void UpdateSettings(bool rescan = false)
