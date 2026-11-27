@@ -55,7 +55,7 @@ public sealed class CheckpointVolumeSteps
         Assert.Equal(0, diff.ExitCode);
         using var differences = JsonDocument.Parse(diff.Output);
         var rows = differences.RootElement.EnumerateArray().ToDictionary(
-            row => row.GetProperty("path").GetString()!, row => row.GetProperty("kind").GetString(), StringComparer.Ordinal);
+            row => row.GetProperty("path").GetString()!, row => row.GetProperty("kind").GetString() ?? throw new InvalidDataException("Missing diff kind."), StringComparer.Ordinal);
         Assert.Equal(96, rows.Count);
         Assert.Equal(_expectedKinds.OrderBy(x => x.Key, StringComparer.Ordinal),
             rows.OrderBy(x => x.Key, StringComparer.Ordinal));
