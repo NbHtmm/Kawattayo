@@ -9,7 +9,7 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
     [void][IO.Directory]::CreateDirectory($root)
     $file = Join-Path $root 'lifecycle.txt'
     [IO.File]::WriteAllText($file, 'initial')
-    $folder = $Mode -ne 'FileLifecycle'
+    $folder = $Mode -notin 'FileLifecycle','PauseResume'
     $target = @{ Id = [guid]::NewGuid().ToString(); Path = $(if ($folder) { $root } else { $file });
         IsFolder = $folder; Recursive = $folder; RecursiveOverride = $folder }
     $settings = @{ Version = 1; Items = @($target); KeepInTray = $false; PollSeconds = 5;
@@ -37,6 +37,7 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
             'Recursion' { Test-SctRecursion $p $view $root $file $evidence }
             'History' { Test-SctHistory $p $view $root $evidence }
             'FileLifecycle' { Test-SctFileLifecycle $p $view $file $evidence }
+            'PauseResume' { Test-SctPauseResume $p $view $file $evidence }
             default { throw "Unknown GUI scenario: $Mode." }
         }
     } finally {
@@ -47,6 +48,57 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
             }
         } finally { $p.Dispose() }
     }
+}
+
+
+function Test-SctPauseResume($Process, $View, [string]$File, [string]$Evidence) {
+    Invoke-SctUiButton $View '設定…'
+    $settings = Wait-SctUi 'settings window' { Get-SctOwnedWindow $Process.Id 'かわったよ | 設定' }
+    $tab = Get-SctUiLabel $settings '動作と表示'
+    $select = $null
+    if (!$tab -or !$tab.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$select)) {
+        throw 'Could not select the preferences tab.'
+    }
+    $select.Select()
+    [void](Wait-SctUi 'pause button in preferences' { Get-SctUiLabel $settings '一時停止' })
+    Invoke-SctUiButton $settings '一時停止'
+    $view = Wait-SctUi 'monitor paused' {
+        $main = Get-SctMonitorWindow $Process
+        if ($main -and (Get-SctUiLabel $main '一時停止中')) { $main }
+    }
+    $contents = 'written while monitoring was paused'
+    [IO.File]::WriteAllText($File, $contents)
+    # Remain paused for longer than the fixture's 5-second poll interval.
+    $elapsed = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $view = Get-SctMonitorWindow $Process
+        if (!$view -or !(Get-SctUiLabel $view '一時停止中') -or !(Get-SctUiLabel $view '未読 0 件')) {
+            throw 'The monitor ran or published an event while paused.'
+        }
+        if ($elapsed.ElapsedMilliseconds -ge 5500) { break }
+        Start-Sleep -Milliseconds 250
+    } while ($true)
+    $elapsed.Stop()
+
+    [void](Wait-SctUi 'resume button in preferences' { Get-SctUiLabel $settings '監視を再開' })
+    Invoke-SctUiButton $settings '監視を再開'
+    $view = Wait-SctUi 'resuming reports the update that occurred during pause' {
+        $main = Get-SctMonitorWindow $Process
+        if ($main -and (Get-SctUiLabel $main '最終巡回 ' -Prefix) -and (Get-SctUiLabel $main '未読 1 件') -and
+            (Get-SctUiLabel $main 'lifecycle.txt を既読にする') -and (Get-SctUiLabel $main '更新')) { $main }
+    }
+    Invoke-SctUiButton $view '履歴'
+    $history = Wait-SctUi 'history with the file changed while paused' {
+        $window = Get-SctOwnedWindow $Process.Id 'かわったよ | 変更履歴'
+        if ($window -and (Get-SctUiLabel $window $File)) { $window }
+    }
+    $property = [Windows.Automation.AutomationElement]::NameProperty
+    $scope = [Windows.Automation.TreeScope]::Descendants
+    $hits = @($history.FindAll($scope, [Windows.Automation.PropertyCondition]::new($property, $File)))
+    if ($hits.Count -ne 1 -or [IO.File]::ReadAllText($File) -cne $contents) {
+        throw 'Expected one history entry and the original file contents to remain intact.'
+    }
+    [IO.File]::WriteAllText($Evidence, "PASS: zero unread during $($elapsed.ElapsedMilliseconds) ms of pause; one update on resume, one history entry, source unchanged.")
 }
 
 function Test-SctFileLifecycle($Process, $View, [string]$File, [string]$Evidence) {
