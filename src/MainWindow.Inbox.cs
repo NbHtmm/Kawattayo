@@ -149,8 +149,11 @@ internal sealed partial class MainWindow
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.Controls.Add(__actionScope, 0, 0);
         __clearDeleted = WatchTheme.Button("消失通知を消す", ClearDeletionNotices);
-        bar.Controls.Add(WatchTheme.Actions(WatchTheme.Button("すべて展開", __inbox.ExpandAll),
-            WatchTheme.Button("すべて折りたたむ", __inbox.CollapseAll), __clearDeleted, __toggleDetails), 1, 0);
+        var actions = WatchTheme.Actions(WatchTheme.Button("すべて展開", __inbox.ExpandAll),
+            WatchTheme.Button("すべて折りたたむ", __inbox.CollapseAll), __clearDeleted, __toggleDetails);
+        actions.WrapContents = true;
+        bar.ClientSizeChanged += (_, _) => actions.MaximumSize = new(Math.Max(1, bar.ClientSize.Width), 0);
+        bar.Controls.Add(actions, 1, 0);
         return bar;
     }
 
@@ -358,9 +361,11 @@ internal sealed partial class MainWindow
             return root;
         }
 
+        // フォルダの枝を名前で毎回線形検索せず、相対パスをキーにして再利用する。
+        var branches = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
         foreach (var change in item.PendingFiles.Values)
         {
-            AddChangedFile(root, item.Id, change, now);
+            AddChangedFile(root, item.Id, change, now, branches);
         }
 
         // 旧版の未読にファイル別の内訳がなければ、件数だけを案内行に残す。
@@ -377,7 +382,8 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 未読の対象や変更された子ファイルをツリーに追加する。
-    private static void AddChangedFile(TreeNode root, Guid id, FileChange change, DateTimeOffset now)
+    private static void AddChangedFile(TreeNode root, Guid id, FileChange change, DateTimeOffset now,
+        Dictionary<string, TreeNode> branches)
     {
         var pieces = change.Relative.Split(Path.DirectorySeparatorChar);
         if (change.Relative == ".")
@@ -398,12 +404,11 @@ internal sealed partial class MainWindow
         {
             relative = Path.Combine(relative, pieces[i]);
             var key = root.Name + "|dir|" + relative;
-            var branch = parent.Nodes[key];
-            // 途中のフォルダ行がまだなければ作成し、同じ枝を重複させない。
-            if (branch is null)
+            if (!branches.TryGetValue(relative, out var branch))
             {
                 branch = NewNode(key, new(id, pieces[i], relative, null, true, null, null, "—", true), now);
                 parent.Nodes.Add(branch);
+                branches.Add(relative, branch);
             }
             parent = branch;
         }

@@ -4,16 +4,15 @@ using System.Text;
 
 namespace ShareFileWatch;
 
-// Immutable snapshots share unchanged buckets. Publishing the JSON pointer AFTER COMMIT
-// lets the old JSON (including its .bak) still read precisely its own inventory.
-internal sealed class InventoryDb : IDisposable
+// 比較一覧の世代は SQLite 内で共有し、監視状態と同じトランザクションで確定する。
+internal sealed partial class InventoryDb : IDisposable
 {
     private nint db;
     internal InventoryDb(string file, bool create)
     {
         try
         {
-            Check(sqlite3_open_v2(file, out db, create ? 6 : 1, 0));
+            Check(sqlite3_open_v2(file, out db, create ? 6 : 2, 0));
             if (create) Exec("CREATE TABLE IF NOT EXISTS snapshots(id TEXT PRIMARY KEY, n INTEGER NOT NULL);" +
                 "CREATE TABLE IF NOT EXISTS parts(id TEXT, hash TEXT, PRIMARY KEY(id,hash)) WITHOUT ROWID;" +
                 "CREATE TABLE IF NOT EXISTS files(hash TEXT,path TEXT,modified INTEGER,created INTEGER,bytes INTEGER, PRIMARY KEY(hash,path)) WITHOUT ROWID;");
@@ -35,6 +34,12 @@ internal sealed class InventoryDb : IDisposable
         internal void Text(int i, string v) => owner.Check(sqlite3_bind_text16(s, i, v, v.Length * 2, -1));
         internal void Number(int i, long v) => owner.Check(sqlite3_bind_int64(s, i, v));
         internal long Number(int i) => sqlite3_column_int64(s, i);
+        internal long? OptionalNumber(int i) => sqlite3_column_type(s, i) == 5 ? null : Number(i);
+        internal void Number(int i, long? v)
+        {
+            if (v is long n) Number(i, n);
+            else owner.Check(sqlite3_bind_null(s, i));
+        }
         internal string Text(int i) => Marshal.PtrToStringUni(sqlite3_column_text16(s, i)) ?? throw new IOException("比較 DB の文字列が無効です。");
         internal bool Next() { int rc = sqlite3_step(s); if (rc == 100) return true; if (rc != 101) owner.Check(rc); return false; }
         internal void Reset() => owner.Check(sqlite3_reset(s));
@@ -45,7 +50,7 @@ internal sealed class InventoryDb : IDisposable
     internal Dictionary<string,Fingerprint> Read(string id)
     {
         using var size = new Statement(this, "SELECT n FROM snapshots WHERE id=?"); size.Text(1,id);
-        if (!size.Next()) throw new IOException("設定に対応するフォルダ比較 DB の世代がありません。");
+        if (!size.Next()) throw new IOException("フォルダ比較 DB の世代がありません。");
         long count = size.Number(0);
         using var rows = new Statement(this, "SELECT f.path,f.modified,f.created,f.bytes FROM parts p JOIN files f ON f.hash=p.hash WHERE p.id=?");
         rows.Text(1,id);
@@ -111,6 +116,8 @@ internal sealed class InventoryDb : IDisposable
     [DllImport(Dll)] private static extern int sqlite3_bind_int64(nint s,int i,long v);
     [DllImport(Dll)] private static extern long sqlite3_column_int64(nint s,int i);
     [DllImport(Dll)] private static extern nint sqlite3_column_text16(nint s,int i);
+    [DllImport(Dll)] private static extern int sqlite3_bind_null(nint s,int i);
+    [DllImport(Dll)] private static extern int sqlite3_column_type(nint s,int i);
     [DllImport(Dll)] private static extern int sqlite3_step(nint s);
     [DllImport(Dll)] private static extern int sqlite3_reset(nint s);
     [DllImport(Dll)] private static extern int sqlite3_finalize(nint s);

@@ -18,14 +18,14 @@ internal sealed class WatchItem
     {
         get; set;
     } //!< フォルダ種別および配下を再帰監視する設定。
+    [JsonIgnore]
     public int Revision
     {
         get; set;
     } //!< 範囲変更前の観測結果を捨てるための世代番号。
     // フォルダの比較基準。同じフォルダでも監視範囲を変えたときは新しい基準を作る。
+    [JsonIgnore]
     public string[]? InventoryExclusions { get; set; } //!< 最後に成功した一覧を作った除外ルール。
-    public string? InventorySnapshot { get; set; }
-    internal Dictionary<string, Fingerprint>? SavedInventory { get; set; }
     internal long? QueryStart, QueryMs;
     internal bool QueryStopped;
     [JsonIgnore]
@@ -33,13 +33,12 @@ internal sealed class WatchItem
     {
         get; set;
     } //!< 前回正常に取得した比較基準。
-    // Read old JSON inventories but never write one to the settings file.
-    [JsonPropertyName("Inventory"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Dictionary<string, Fingerprint>? LegacyInventory { get => null; set => Inventory = value; }
+    [JsonIgnore]
     public ProbeState? Baseline
     {
         get; set;
     } //!< 前回正常に取得した比較基準。
+    [JsonIgnore]
     public Fingerprint? Fingerprint
     {
         get; set;
@@ -49,24 +48,31 @@ internal sealed class WatchItem
     {
         get; set;
     } //!< 照会・変更・既読・実ファイル更新の各時刻。
+    [JsonIgnore]
     public DateTimeOffset? LastChanged
     {
         get; set;
     } //!< 照会・変更・既読・実ファイル更新の各時刻。
+    [JsonIgnore]
     public DateTimeOffset? AcknowledgedAt
     {
         get; set;
     } //!< 照会・変更・既読・実ファイル更新の各時刻。
+    [JsonIgnore]
     public DateTimeOffset? LatestFileWriteAt
     {
         get; set;
     } //!< 照会・変更・既読・実ファイル更新の各時刻。
+    [JsonIgnore]
     public DateTimeOffset? LastModified
     {
         get; set;
     } //!< 照会・変更・既読・実ファイル更新の各時刻。
+    [JsonIgnore]
     public Dictionary<string, FileChange> PendingFiles { get; set; } = new(StringComparer.OrdinalIgnoreCase); //!< 未読の子ファイルまたは最後に検知した変化。
+    [JsonIgnore]
     public string LastChange { get; set; } = ""; //!< 未読の子ファイルまたは最後に検知した変化。
+    [JsonIgnore]
     public int Unread
     {
         get; set;
@@ -78,6 +84,7 @@ internal sealed class WatchItem
     } //!< 取得できなかった理由。正常なときは null。
 
     /// @brief 前回成功時の基準と比較し、通信断を削除と区別する。
+    [JsonIgnore]
     public long? DirectoryStamp { get; set; }
 
     public string? Observe(ProbeResult result, DateTimeOffset now, Action<string, string>? onChange = null, bool notifyDeleted = true)
@@ -112,7 +119,8 @@ internal sealed class WatchItem
     }
 
     /// @brief 前回成功時の基準と比較し、通信断を削除と区別する。
-    public string? ObserveFolder(FolderResult result, DateTimeOffset now, Action<string, string>? onChange = null, bool notifyDeleted = true)
+    public string? ObserveFolder(FolderResult result, DateTimeOffset now, Action<string, string>? onChange = null,
+        bool notifyDeleted = true, List<FileChange>? preparedChanges = null)
     {
         LastChecked = now;
         // フォルダを列挙できない場合は前回一覧を残し、子ファイルの消失にしない。
@@ -133,7 +141,7 @@ internal sealed class WatchItem
         }
 
         bool scopeChanged = !FileExclusions.Same(InventoryExclusions, result.Exclusions);
-        var changes = FolderProbe.Compare(Inventory, result.Files, now,
+        var changes = preparedChanges ?? FolderProbe.Compare(Inventory, result.Files, now,
             scopeChanged ? InventoryExclusions : null, scopeChanged ? result.Exclusions : null);
         if (!notifyDeleted && changes.RemoveAll(x => x.Kind == "消失") != 0)
             ReplaceInventory(result.Files, result.Exclusions, now);
@@ -142,8 +150,7 @@ internal sealed class WatchItem
         // 子ファイルに差分がなければ、未読も履歴も増やさない。
         if (changes.Count == 0)
         {
-            // 旧版から開いたときなど、表示用の時刻だけ補う。
-            // 旧設定などで表示用の日時だけが欠けていれば、既存ファイルから補う。
+            // 表示用の日時だけが欠けていれば、既存ファイルから補う。
             if (scopeChanged || (LatestFileWriteAt is null && result.Files.Count != 0))
             {
                 ReplaceInventory(result.Files, result.Exclusions, now);
@@ -187,7 +194,7 @@ internal sealed class WatchItem
         PendingFiles[change.Relative] = change;
     }
 
-    /// @brief 旧形式から引き継いだ内訳不明の件数。
+    /// @brief 子ファイル単位では表示しない未読件数。
     [JsonIgnore]
     public int SavedUnreadWithoutDetails => (int)Math.Max(0, Unread - PendingFiles.Values.Sum(x => (long)x.Count));
 
@@ -249,6 +256,15 @@ internal sealed class WatchItem
     }
 
     /// @brief 対象範囲の未読を消し既読時刻を記録する。
+    // 一覧の比較基準は作成後に変更せず、差分取得時も新しい辞書へ書く。
+    // 大きな一覧を複製せず、UI が書き換える未読辞書だけをコピーする。
+    internal WatchItem CaptureForSave()
+    {
+        var copy = (WatchItem)MemberwiseClone();
+        copy.PendingFiles = new(PendingFiles, PendingFiles.Comparer);
+        return copy;
+    }
+
     public void Acknowledge()
     {
         // すでに既読なら確認時刻や未読情報を書き換えない。
@@ -270,6 +286,7 @@ internal sealed class AppState
     public bool LowServerLoad { get; set; } = true;
     public bool WatchDirectoryTime { get; set; }
     public bool NotifyDeleted { get; set; }
+    [JsonIgnore]
     public Queue<HistoryEntry> History { get; set; } = new(); //!< 保存する履歴の上限または検知順の履歴。
     public string[] ExcludedFilePatterns { get; set; } = ["~$*"]; //!< Office のロックファイルを既定で除外する。
     public int TextSizePoints { get; set; } = 10; //!< UI の基準文字サイズ（pt）。
@@ -288,6 +305,14 @@ internal sealed class AppState
     } //!< 監視一時停止・通知領域への常駐設定。
     public bool KeepInTray { get; set; } = true; //!< 監視一時停止・通知領域への常駐設定。
     public List<WatchItem> Items { get; set; } = []; //!< 登録した監視対象の一覧。
+
+    internal AppState CaptureForSave()
+    {
+        var copy = (AppState)MemberwiseClone();
+        copy.History = new(History);
+        copy.Items = Items.Select(item => item.CaptureForSave()).ToList();
+        return copy;
+    }
 }
 
 /// @brief 検知時刻・パス・変更種別を記録する履歴項目。

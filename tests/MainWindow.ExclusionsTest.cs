@@ -33,7 +33,7 @@ internal sealed partial class MainWindow
         SelfTest.Check(FileExclusions.Matches(temp, __store.Load().State.ExcludedFilePatterns) &&
             fileTarget.Unread == 0 && folderTarget.Unread == 0, "apply persists exclusion and clears excluded unread items");
         var targetRow = __targetList.Items.Cast<ListViewItem>().Single(row => Equals(row.Tag, fileTarget.Id));
-        SelfTest.Check(targetRow.SubItems[1].Text == "除外中", "excluded direct registration stays listed with its status");
+        SelfTest.Check(targetRow.SubItems[1].Text == "0" && targetRow.SubItems[2].Text == "除外中", "excluded direct registration stays listed with its status");
         var historyCount = __state.History.Count;
         await File.AppendAllTextAsync(temp, " silent edit");
         await File.AppendAllTextAsync(ordinary, " ordinary edit");

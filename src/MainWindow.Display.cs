@@ -58,6 +58,7 @@ internal sealed partial class MainWindow
         UpdateOptionsScrollWidth();
         ResizeInboxMetrics();
         SizeDisplayList(__targetList, points);
+        FitTargetLeadingColumns(__targetList.Columns[^1]);
         if (__historyRows is { } historyRows)
         {
             SizeDisplayList(historyRows, points);

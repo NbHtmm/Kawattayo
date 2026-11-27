@@ -23,13 +23,13 @@ internal sealed partial class MainWindow
                 __inbox.Font.SizeInPoints == MaximumDisplayPoints &&
                 __targetList.Font.SizeInPoints == MaximumDisplayPoints &&
                 __inbox.ItemHeight > previousHeight &&
-                __scanNow.Width > previousButton && __viewport.HorizontalScroll.Visible &&
+                __scanNow.Width > previousButton && !__viewport.HorizontalScroll.Visible &&
                 __store.Load().State.TextSizePoints == MaximumDisplayPoints,
                 "display text size applies to both screens, resizes rows, and persists");
 
             var columns = __inbox.LayoutColumns;
-            SelfTest.Check(columns.Change > 0 && columns.Change < columns.Updater &&
-                columns.Updater < columns.Detected && columns.Detected < columns.Action &&
+            SelfTest.Check(columns.Change > 0 && columns.Change >= __inbox.ClientSize.Width * 0.49 && columns.Change < columns.Updater &&
+                columns.Updater <= columns.Detected && columns.Detected < columns.Action &&
                 columns.Action < columns.End, "large text keeps compact inbox columns ordered");
 
             var options = (Panel)__settingsTabs.TabPages[1].Controls[0];

@@ -39,7 +39,7 @@ internal sealed partial class MainWindow
             int padding = ScaleForDisplay(this, 5);
             int gap = ScaleForDisplay(this, 4);
             int left = Math.Max(padding, Math.Min(padding + node.Level * Indent,
-                cols.Change - marker - icon - 3 * gap - ScaleForDisplay(this, 17)));
+                cols.Change - marker - icon - 3 * gap - Math.Max(48, cols.Change / 2)));
             int centerY = nativeBounds.Top + nativeBounds.Height / 2;
             var toggle = node.Nodes.Count > 0 && marker > 0
                 ? new Rectangle(left, centerY - marker / 2, marker, marker)

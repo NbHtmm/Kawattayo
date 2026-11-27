@@ -3,25 +3,20 @@ namespace ShareFileWatch;
 internal sealed partial class MainWindow
 {
     private readonly Panel __viewport = new() { AutoScroll = true, Dock = DockStyle.Fill };
-    private int __pageWidth;
-
-    private void MeasureInboxPage()
-    {
-        int label = 0;
-        foreach (var n in Flatten(__inbox.Nodes))
-            if (n.Tag is InboxRow row)
-                label = Math.Max(label, TextRenderer.MeasureText(row.Label, __inbox.Font).Width + n.Level * __inbox.Indent);
-        __pageWidth = Math.Max(ScaleForDisplay(this, 640), label + ScaleForDisplay(this, 500));
-        SizeInboxPage();
-    }
+    // 長いファイル名に合わせてページを広げると、縮小時や横スクロール後に名前欄が画面外へ出る。
+    // ページは実際に見える幅に固定し、長い名前の全体はツールチップや詳細で読めるようにする。
+    private void MeasureInboxPage() => SizeInboxPage();
 
     private void SizeInboxPage()
     {
         if (__viewport.Controls.Count == 0) return;
         var page = __viewport.Controls[0];
-        page.Dock = DockStyle.None;
-        page.Size = new Size(Math.Max(__pageWidth, __viewport.ClientSize.Width),
-            Math.Max(ScaleForDisplay(this, __inboxDetails?.Visible == true ? 430 : 230), __viewport.ClientSize.Height));
+        // 上辺にドックして、縦スクロールバーが出た分の幅を WinForms に引かせる。
+        page.Dock = DockStyle.Top;
+        int viewportHeight = __viewport.ClientSize.Height +
+            (__viewport.HorizontalScroll.Visible ? SystemInformation.HorizontalScrollBarHeight : 0);
+        page.Height = Math.Max(ScaleForDisplay(this, __inboxDetails?.Visible == true ? 430 : 230, scaleText: false),
+            viewportHeight);
     }
 
     private void ClearDeletionNotices()

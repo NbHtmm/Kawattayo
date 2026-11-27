@@ -24,12 +24,15 @@ internal sealed partial class MainWindow
     {
         // 狭い画面でも右側の列が名前欄を押し出さないよう、補助列を比例して縮める。
         // 行・見出し・クリック判定はいずれも同じ境界を参照する。
-        const float secondaryWidth = 111 + 117 + 105 + 84;
         int end = Math.Max(1, width);
-        float scale = Math.Min(dpi / 96f * textScale, end * 0.73f / secondaryWidth);
+        float displayScale = dpi / 96f * textScale;
+        // 狭いときは情報の少ない「最終更新者」列を畳み、名前と操作を優先する。
+        int owner = end >= 690 * displayScale ? 117 : 0;
+        int secondaryWidth = 111 + owner + 105 + 84;
+        float scale = Math.Min(displayScale, end * (owner == 0 ? 0.5f : 0.63f) / secondaryWidth);
         int action = end - (int)Math.Round(84 * scale);
         int detected = end - (int)Math.Round((84 + 105) * scale);
-        int updater = end - (int)Math.Round((84 + 105 + 117) * scale);
+        int updater = end - (int)Math.Round((84 + 105 + owner) * scale);
         return new(end - (int)Math.Round(secondaryWidth * scale), updater, detected, action, end);
     }
 
@@ -214,6 +217,7 @@ internal sealed partial class MainWindow
             using var separator = new Pen(WatchTheme.Border);
             for (int i = 0; i < s_s_inboxColumnTitles.Length; i++)
             {
+                if (boundaries[i + 1] <= boundaries[i]) continue;
                 // 先頭列には左隣がないため、区切り線は2列目以降に引く。
                 if (i > 0)
                 {

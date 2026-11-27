@@ -30,6 +30,10 @@ internal sealed partial class MainWindow : Form
     private bool __exiting; //!< 終了後の非同期 UI 更新を抑止するフラグ。
     private bool __isScanning => __activeScanRoots.Count != 0; //!< いずれかの共有先を照会中か。
     private bool __hasUnsavedChanges; //!< 未保存の変更があり保存再試行が必要か。
+    private long __saveRevision;
+    private Task? __saveWorker;
+    private bool __closeAfterSave, __waitingToClose;
+    private Action? __testBeforeBackgroundSave = null;
     private string? __saveError; //!< ステータス欄に表示する直近の失敗理由。
     private DateTimeOffset? __lastPoll; //!< 直近の巡回が終了した時刻。
     private readonly bool __testMode; //!< 試験中の通知・自動巡回を抑止する。
@@ -239,19 +243,48 @@ internal sealed partial class MainWindow : Form
         __stopQuery.Text = __state.Paused ? "監視を再開" : "照会を中断";
     }
 
-    // 設定・差分・確認操作だけを同期保存する。変化のない巡回はキャッシュを書かない。
-    /// @brief 状態を保存し、失敗時に既存データを保護する。
+    // SQLite の一覧書き込み・古い世代の整理・ディスクフラッシュは UI スレッドで行わない。
     private void Save()
     {
         __hasUnsavedChanges = true;
-        try
+        __saveRevision++;
+        if (__testMode && __testBeforeBackgroundSave is null)
         {
-            __store.Save(__state);
-            __saveError = null;
-            __hasUnsavedChanges = false;
+            // 従来の画面テストは操作直後のディスク状態も照合する。
+            __saveError = WriteState(__state);
+            __hasUnsavedChanges = __saveError is not null;
+            UpdateStatus();
+            return;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { __saveError = ex.Message; }
-        UpdateStatus();
+        if (__saveWorker is null || __saveWorker.IsCompleted)
+            __saveWorker = SavePendingAsync();
+    }
+
+    private string? WriteState(AppState state)
+    {
+        try { __store.Save(state); return null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return ex.Message; }
+    }
+
+    private async Task SavePendingAsync()
+    {
+        // 1本の書き込みに絞り、保存中に来た要求は次の最新版にまとめる。
+        while (__hasUnsavedChanges)
+        {
+            var version = __saveRevision;
+            var snapshot = __state.CaptureForSave();
+            __saveError = await Task.Run(() =>
+            {
+                __testBeforeBackgroundSave?.Invoke();
+                return WriteState(snapshot);
+            });
+            if (__saveError is null)
+            {
+                __hasUnsavedChanges = version != __saveRevision;
+            }
+            if (!IsDisposed) UpdateStatus();
+            if (version == __saveRevision) break; // 失敗時は次回の更新または終了時に再試行する。
+        }
     }
 
     /// @brief 通知領域とメイン画面の表示を切り替える。
@@ -280,8 +313,10 @@ internal sealed partial class MainWindow : Form
     }
 
     /// @brief 閉じる操作を常駐または終了として処理する。
-    private void OnClosing(object? sender, FormClosingEventArgs e)
+    private async void OnClosing(object? sender, FormClosingEventArgs e)
     {
+        if (__closeAfterSave) return;
+        if (__waitingToClose) { e.Cancel = true; return; }
         // 常駐中の手動クローズは終了にせず、通知領域に戻す。
         if (!__exiting && __state.KeepInTray && e.CloseReason == CloseReason.UserClosing)
         {
@@ -289,15 +324,19 @@ internal sealed partial class MainWindow : Form
             HideToTray();
             return;
         }
-        // 保存に失敗した変更が残っていれば終了前に再試行する。
-        if (__hasUnsavedChanges)
-        {
-            Save();
-        }
-
         __exiting = true;
         __pollTimer.Stop();
         __tray.Visible = false;
+        // 手動終了でも、最後の書き込みが終わる前にプロセスを閉じない。
+        if (__scanNeedsSave || (__hasUnsavedChanges && (__saveWorker is null || __saveWorker.IsCompleted))) Save();
+        if (__saveWorker is { IsCompleted: false } worker)
+        {
+            e.Cancel = true;
+            __waitingToClose = true;
+            await worker;
+            __closeAfterSave = true;
+            if (!IsDisposed) BeginInvoke(Close);
+        }
     }
 
     /// @brief アプリ共通のショートカットを処理する。

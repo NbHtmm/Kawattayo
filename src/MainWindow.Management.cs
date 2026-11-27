@@ -179,6 +179,7 @@ internal sealed partial class MainWindow
         __targetList.BackColor = WatchTheme.Surface;
         __targetList.ForeColor = WatchTheme.Ink;
         __targetList.Columns.Add("名前", 190);
+        __targetList.Columns.Add("対象ファイル数", 120, HorizontalAlignment.Right);
         __targetList.Columns.Add("状態", 100);
         __targetList.Columns.Add("最終更新", 170);
         __targetList.Columns.Add("最終照会", 170);
@@ -187,8 +188,8 @@ internal sealed partial class MainWindow
         __targetList.Columns.Add("変更通知", 160);
         __targetList.Columns.Add("照会時間", 125);
         var pathColumn = __targetList.Columns.Add("完全なパス", 300);
-        __targetList.ClientSizeChanged += (_, _) => FitTargetPathColumn(pathColumn);
-        __targetList.HandleCreated += (_, _) => FitTargetPathColumn(pathColumn);
+        __targetList.ClientSizeChanged += (_, _) => FitTargetLeadingColumns(pathColumn);
+        __targetList.HandleCreated += (_, _) => FitTargetLeadingColumns(pathColumn);
         __targetList.ColumnWidthChanged += (_, e) =>
         {
             // パス列以外の幅が変わったときだけ、残り幅にパス列を合わせる。
@@ -196,6 +197,11 @@ internal sealed partial class MainWindow
             {
                 FitTargetPathColumn(pathColumn);
             }
+        };
+        __targetList.ColumnWidthChanging += (_, e) =>
+        {
+            if (e.ColumnIndex == 0)
+                e.NewWidth = Math.Max(e.NewWidth, ScaleForDisplay(__targetList, 125, scaleText: false));
         };
         __targetList.MultiSelect = true;
         BindTargetSorting();
@@ -243,6 +249,26 @@ internal sealed partial class MainWindow
     }
 
     /// @brief 他の列の幅を除いた残りをパス列に割り当てる。
+    private void FitTargetLeadingColumns(ColumnHeader pathColumn)
+    {
+        if (!__targetList.IsHandleCreated || __targetList.ClientSize.Width < 200) return;
+        // 小さな設定画面でも左端の名前と件数を確保し、補助列は横スクロールで見られるようにする。
+        int width = __targetList.ClientSize.Width;
+        var name = __targetList.Columns[0];
+        var count = __targetList.Columns[1];
+        name.Width = Math.Clamp(ScaleForDisplay(__targetList, 190), ScaleForDisplay(__targetList, 125, false),
+            Math.Max(ScaleForDisplay(__targetList, 125, false), width * 55 / 100));
+        count.Width = Math.Min(ScaleForDisplay(__targetList, 120), Math.Max(60, width - name.Width - 18));
+        FitTargetPathColumn(pathColumn);
+        const uint ScrollList = 0x1014; // LVM_SCROLL
+        int totalWidth = __targetList.Columns.Cast<ColumnHeader>().Sum(column => column.Width);
+        // 右の列を見た後にウィンドウを縮めた場合も、先頭の名前列に戻す。
+        SendTargetListMessage(__targetList.Handle, ScrollList, -totalWidth, 0);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendTargetListMessage(nint window, uint message, nint wParam, nint lParam);
+
     private void FitTargetPathColumn(ColumnHeader pathColumn)
     {
         // ネイティブの一覧がまだ作成されていなければ列幅計算を待つ。
@@ -459,6 +485,17 @@ internal sealed partial class MainWindow
         if (!__checks.TryGetValue(item.Id,out var c)) return "未確認";
         return c.Feed switch { null => "購読枠外（毎回照会）", { Watcher:not null, Failed:false } => c.Reliable ? "通知待機中" : "通知あり・照会失敗（毎回照会）", _ => "利用不可（毎回照会）" };
     }
+    // 除外後の比較対象のみ。照会エラー時は前回正常に取得した件数を残す。
+    private int? TargetFileCount(WatchItem item)
+    {
+        if (item.IsFolder)
+            return item.Inventory is { } files && FileExclusions.Same(item.InventoryExclusions, __state.ExcludedFilePatterns)
+                ? files.Count : null;
+        if (FileExclusions.Matches(item.Path, __state.ExcludedFilePatterns)) return 0;
+        return item.Baseline switch { ProbeState.Found => 1, ProbeState.Missing => 0, _ => null };
+    }
+
+    private const int QueryDurationColumn = 8;
     private static string QueryDuration(WatchItem i) => i.QueryStart is long start ? $"照会中 {(Environment.TickCount64-start)/1000.0:F1} 秒" :
         i.QueryMs is long ms ? $"{(i.QueryStopped ? "中断 " : "")}{ms/1000.0:F3} 秒" : "—";
     private void RefreshProgressCells()
@@ -466,8 +503,8 @@ internal sealed partial class MainWindow
         if (!__management.Visible && !__testMode) return;
         var items = __state.Items.ToDictionary(i => i.Id);
         foreach (ListViewItem row in __targetList.Items)
-            if (row.Tag is Guid id && items.TryGetValue(id,out var item) && row.SubItems[7].Text != QueryDuration(item))
-                row.SubItems[7].Text = QueryDuration(item);
+            if (row.Tag is Guid id && items.TryGetValue(id,out var item) && row.SubItems[QueryDurationColumn].Text != QueryDuration(item))
+                row.SubItems[QueryDurationColumn].Text = QueryDuration(item);
     }
     private void UpdateManagementRow(ListViewItem row, WatchItem item)
     {
@@ -478,7 +515,7 @@ internal sealed partial class MainWindow
         }
         if (item.Unread > 0) health = "● 未読 / " + health;
         string scope = !item.IsFolder ? "—" : item.RecursiveOverride switch { true => "ON", false => "OFF", null => "デフォルト" };
-        string[] values = [TargetDisplayName(item), health, Time(item.LatestFileWriteAt, true), Time(item.LastChecked, true), item.IsFolder ? "フォルダ" : "ファイル", scope, FeedStatus(item), QueryDuration(item), item.Path];
+        string[] values = [TargetDisplayName(item), TargetFileCount(item)?.ToString("N0") ?? "—", health, Time(item.LatestFileWriteAt, true), Time(item.LastChecked, true), item.IsFolder ? "フォルダ" : "ファイル", scope, FeedStatus(item), QueryDuration(item), item.Path];
         for (int i = 0; i < values.Length; i++)
         {
             // セルの表示値が変わった場合だけ一覧を書き換える。
@@ -488,7 +525,8 @@ internal sealed partial class MainWindow
             }
         }
 
-        row.ToolTipText = item.Error ?? $"{item.Path}\n{item.LastChange}";
+        row.ToolTipText = $"{TargetDisplayName(item)}\n{item.Path}\n" + (item.Error is { } error
+            ? error + "（件数は前回の正常照会時点）" : item.LastChange);
         row.BackColor = item.Error is not null ? WatchTheme.FailureSurface : item.Unread > 0 ? WatchTheme.Unread : WatchTheme.Surface;
         row.ForeColor = item.Error is not null ? WatchTheme.FailureInk : WatchTheme.Ink;
     }

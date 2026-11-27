@@ -12,7 +12,7 @@ internal sealed partial class MainWindow
     private readonly System.Windows.Forms.Timer __progressTimer = new() { Interval = 500 };
     // Shared by all roots, UI thread only. Never wait for a slow share before checkpointing.
     private readonly System.Windows.Forms.Timer __scanFlush = new() { Interval = 150 };
-    private bool __rowsPending, __inboxPending;
+    private bool __rowsPending, __inboxPending, __scanNeedsSave;
     private readonly List<string> __alertsPending = [];
 
     private void FlushScanUpdates()
@@ -20,7 +20,11 @@ internal sealed partial class MainWindow
         __scanFlush.Stop();
         if (!__rowsPending || __exiting || IsDisposed) return;
         __rowsPending = false;
-        if (__hasUnsavedChanges) Save();
+        if (__scanNeedsSave || __saveError is not null)
+        {
+            __scanNeedsSave = false;
+            Save();
+        }
         if (__inboxPending) RefreshHistory();
         RefreshRows(__inboxPending);
         __inboxPending = false;
@@ -114,7 +118,8 @@ internal sealed partial class MainWindow
                     __checks.TryGetValue(target.Id,out var prior) && prior.Reliable && prior.Feed == feed &&
                     prior.Epoch == feed.Epoch && prior.Revision == target.Revision)
                     (stamp,paths) = feed.Snapshot(prior.Stamp);
-                var result = await Task.Run(() => ProbeTarget(target, stop.Token, baseline, paths));
+                var priorExclusions = item.InventoryExclusions;
+                var result = await Task.Run(() => ProbeTarget(target, stop.Token, baseline, paths, priorExclusions));
                 if (!CanApplyScan(generation))
                 {
                     break;
@@ -164,7 +169,7 @@ internal sealed partial class MainWindow
     private bool CanApplyScan(int generation) =>
         !__exiting && !IsDisposed && !__state.Paused && generation == __scanGeneration;
 
-    private ScanResult ProbeTarget(ScanTarget target, CancellationToken cancellation = default, Dictionary<string,Fingerprint>? baseline = null, string[]? paths = null)
+    private ScanResult ProbeTarget(ScanTarget target, CancellationToken cancellation = default, Dictionary<string,Fingerprint>? baseline = null, string[]? paths = null, string[]? priorExclusions = null)
     {
         FolderResult? folder = null;
         ProbeResult? file = null;
@@ -174,7 +179,7 @@ internal sealed partial class MainWindow
             folder = (paths != null && baseline != null ? FolderProbe.ReadChanges(target.Path,target.Recursive,baseline,paths,Excluded,cancellation)
                 : FolderProbe.Read(target.Path,target.Recursive,Excluded,cancellation)) with { Exclusions = target.Exclusions };
             // Saving the app's own cache changes its parent directory's timestamp.
-            if (folder.Files != null && target.WatchTime && !__store.IsInternalFile(Path.Combine(target.Path, AppDefaults.CacheFileName)))
+            if (folder.Files != null && target.WatchTime && !__store.IsInternalFile(Path.Combine(target.Path, AppDefaults.SettingsFileName)))
             {
                 try { folder = folder with { DirectoryStamp = Directory.GetLastWriteTimeUtc(target.Path).ToFileTimeUtc() }; }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { folder = new(null, ex.Message); }
@@ -188,11 +193,19 @@ internal sealed partial class MainWindow
         {
             file = (__testFileProbe ?? FileProbe.Read)(target.Path);
         }
-        return new(target.Id, target.Revision, file, folder, DateTimeOffset.Now);
+        var at = DateTimeOffset.Now;
+        List<FileChange>? prepared = null;
+        if (baseline is not null && folder?.Files is { } files)
+        {
+            bool scopeChanged = !FileExclusions.Same(priorExclusions, target.Exclusions);
+            prepared = FolderProbe.Compare(baseline, files, at,
+                scopeChanged ? priorExclusions : null, scopeChanged ? target.Exclusions : null);
+        }
+        return new(target.Id, target.Revision, file, folder, at, prepared);
     }
 
     private sealed record ScanTarget(Guid Id, string Path, bool IsFolder, bool Recursive, int Revision, string[] Exclusions, bool WatchTime, bool Low = false, ChangeFeed? Feed = null);
-    private sealed record ScanResult(Guid Id, int Revision, ProbeResult? File, FolderResult? Folder, DateTimeOffset At);
+    private sealed record ScanResult(Guid Id, int Revision, ProbeResult? File, FolderResult? Folder, DateTimeOffset At, List<FileChange>? PreparedChanges);
     private sealed class ScanPass
     {
         public int AlertCount { get; set; }
@@ -224,7 +237,7 @@ internal sealed partial class MainWindow
 
         if (result.Folder is { } folder)
         {
-            item.ObserveFolder(folder, result.At, Record, __state.NotifyDeleted);
+            item.ObserveFolder(folder, result.At, Record, __state.NotifyDeleted, result.PreparedChanges);
         }
         else
         {
@@ -234,9 +247,9 @@ internal sealed partial class MainWindow
         __lastPoll = result.At;
         bool exclusionScopeChanged = !FileExclusions.Same(inventoryExclusionsBefore, item.InventoryExclusions ?? []);
         if (changed || inventoryBefore != item.Inventory || stampBefore != item.DirectoryStamp || exclusionScopeChanged || item.Baseline != baselineBefore ||
-            item.LatestFileWriteAt != lastWriteBefore || __hasUnsavedChanges)
+            item.LatestFileWriteAt != lastWriteBefore)
         {
-            __hasUnsavedChanges = true;
+            __scanNeedsSave = true;
         }
         __rowsPending = true;
         __inboxPending |= changed;

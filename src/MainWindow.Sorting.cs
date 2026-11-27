@@ -54,7 +54,7 @@ internal sealed partial class MainWindow
     }
 
     private static readonly string[] s_targetHeadings =
-        ["名前", "状態", "最終更新", "最終照会", "種類", "再帰監視", "変更通知", "照会時間", "完全なパス"];
+        ["名前", "対象ファイル数", "状態", "最終更新", "最終照会", "種類", "再帰監視", "変更通知", "照会時間", "完全なパス"];
     private static readonly string[] s_historyHeadings = ["検知日時", "変更", "ファイルパス"];
 
     private void BindTargetSorting()
@@ -92,11 +92,20 @@ internal sealed partial class MainWindow
         int column = __targetSort.Column;
         int result = column switch
         {
-            2 => __targetSort.CompareTime(x.LatestFileWriteAt, y.LatestFileWriteAt),
-            3 => __targetSort.CompareTime(x.LastChecked, y.LastChecked),
+            1 => CompareTargetFileCount(x, y),
+            3 => __targetSort.CompareTime(x.LatestFileWriteAt, y.LatestFileWriteAt),
+            4 => __targetSort.CompareTime(x.LastChecked, y.LastChecked),
             _ => __targetSort.CompareText(left.SubItems[column].Text, right.SubItems[column].Text)
         };
         return result != 0 ? result : StringComparer.OrdinalIgnoreCase.Compare(x.Path, y.Path);
+    }
+
+    private int CompareTargetFileCount(WatchItem x, WatchItem y)
+    {
+        var left = TargetFileCount(x);
+        var right = TargetFileCount(y);
+        return left is null ? right is null ? 0 : 1 :
+            right is null ? -1 : __targetSort.Compare(left.Value, right.Value);
     }
 
     /// @brief 通知の親子関係を変えず、同じ階層にある行だけを並び替える。

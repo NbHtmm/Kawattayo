@@ -16,13 +16,14 @@ internal static class SelfTest
             if (ui)
             {
                 TestWindow(root.FullName, lines, Path.GetFileName(report).Contains("preview", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(report) : null);
+                MainWindow.TestLargeRepositoryLayoutAndPersistence(root.FullName, lines);
             }
             // 通常の自己テストでは設定の永続化とファイル・フォルダ監視を検証する。
             else
             {
                 TestCache(root.FullName, lines);
-                InventoryTests.Migrate(root.FullName);
-                lines.Add("PASS: legacy inventory migration, exact backup generation and missing database protection");
+                InventoryTests.TestSplit(root.FullName);
+                lines.Add("PASS: settings-only JSON, SQLite cache and independent recovery");
                 TestPortableStore(root.FullName, lines);
                 TestCacheExclusion(root.FullName, lines);
                 TestUserExclusions(root.FullName, lines);
@@ -74,9 +75,11 @@ internal static class SelfTest
         store.Save(reopened);
         Check(new StateStore(file).Load().State.Items.Single() is { Unread: 0, AcknowledgedAt: not null }, "ack survives reload");
 
+        reopened.PollSeconds = 17;
+        store.Save(reopened);
         File.WriteAllText(file, "{");
         var restored = store.Load();
-        Check(restored.Warning is not null && restored.State.Items.Single().Unread == 1, "recover previous valid backup");
+        Check(restored.Warning is not null && restored.State.PollSeconds == 15 && restored.State.Items.Single().Unread == 0, "recover previous valid backup");
         Check(Directory.GetFiles(root, "cache.json.broken-*").Length == 1, "preserve corrupt source");
         Check(File.Exists(file) && File.Exists(file + ".bak") && store.Load() is { Warning: null }, "restore primary immediately and keep valid backup");
         var invalidStore = new StateStore(Path.Combine(root, "invalid-child.json"));
@@ -96,7 +99,7 @@ internal static class SelfTest
     private static void TestPortableStore(string root, List<string> lines)
     {
         var exeDir = Path.Combine(root, "portable app");
-        var dest = Path.Combine(exeDir, "cache.json");
+        var dest = Path.Combine(exeDir, AppDefaults.SettingsFileName);
         var old = Path.Combine(root, "legacy", "cache.json");
         var state = new AppState { PollSeconds = 17, DarkMode = true };
         state.History.Enqueue(new(DateTimeOffset.Now, Path.Combine(root, "sample.txt"), "更新"));
@@ -104,7 +107,7 @@ internal static class SelfTest
         var fresh = Path.Combine(root, "first launch");
         legacy.Save(state);
         var blank = StateStore.BesideExecutable(fresh).Load().State;
-        Check(blank.Items.Count == 0 && blank.History.Count == 0 && !blank.DarkMode && File.Exists(Path.Combine(fresh, "cache.json")), "new directory has independent settings and history");
+        Check(blank.Items.Count == 0 && blank.History.Count == 0 && !blank.DarkMode && File.Exists(Path.Combine(fresh, AppDefaults.SettingsFileName)), "new directory has independent settings and history");
         var store = StateStore.BesideExecutable(exeDir);
         store.Save(state);
         state.PollSeconds = 33;
@@ -167,10 +170,10 @@ internal static class SelfTest
     {
         var folder = Directory.CreateDirectory(Path.Combine(root, "cache-exclusion")).FullName;
         var sibling = Directory.CreateDirectory(Path.Combine(folder, "user-files")).FullName;
-        var cache = Path.Combine(folder, AppDefaults.CacheFileName);
+        var cache = Path.Combine(folder, AppDefaults.SettingsFileName);
         var ownTemporary = cache + ".tmp";
         var ownRecovered = cache + ".broken-" + Guid.NewGuid().ToString("N");
-        var otherCache = Path.Combine(sibling, AppDefaults.CacheFileName);
+        var otherCache = Path.Combine(sibling, AppDefaults.SettingsFileName);
         var store = new StateStore(cache);
         var now = DateTimeOffset.Now;
         File.WriteAllText(otherCache, "unrelated user file");
@@ -180,15 +183,13 @@ internal static class SelfTest
         File.WriteAllText(ownRecovered, "archived");
 
         var old = new WatchItem { Path = folder, IsFolder = true, Recursive = true };
-        old.ObserveFolder(FolderProbe.Read(folder, true), now);
-        old.PendingFiles[AppDefaults.CacheFileName] = new(AppDefaults.CacheFileName, "更新", now);
-        old.Unread = 1;
+        old.ObserveFolder(FolderProbe.Read(folder, true, store.IsInternalFile), now);
         store.Save(new AppState { Items = [old] });
 
         var current = store.Load().State.Items.Single();
         var snapshot = FolderProbe.Read(folder, true, store.IsInternalFile);
         Check(snapshot.Files?.Keys.SequenceEqual([Path.GetRelativePath(folder, otherCache)]) == true, "exclude only own cache and sidecars");
-        Check(current.Unread == 0 && current.ObserveFolder(snapshot, now) is null, "old cache never produces deletion or leaves synthetic unread");
+        Check(current.Unread == 0 && current.ObserveFolder(snapshot, now) is null, "internal cache never produces deletion or synthetic unread");
         File.AppendAllText(otherCache, "real edit");
         Check(current.ObserveFolder(FolderProbe.Read(folder, true, store.IsInternalFile), now) is not null, "another folder's same-name file still detected");
         store.Save(new AppState { Items = [current] });

@@ -91,8 +91,8 @@ internal sealed partial class MainWindow
         __targetList.Items[0].Selected = true;
         SelfTest.Check(__scanNow.Enabled && __inboxActionBar.Visible, "unread actions are ready");
         SelfTest.Check(__state.Items[0].Unread > 0, "GUI shows unread");
-        SelfTest.Check(__targetList.Items[0].SubItems[2].Text == __state.Items[0].LatestFileWriteAt!.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss") &&
-            __targetList.Items[0].SubItems[3].Text == __state.Items[0].LastChecked!.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss"), "settings shows year in both timestamps");
+        SelfTest.Check(__targetList.Items[0].SubItems[3].Text == __state.Items[0].LatestFileWriteAt!.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss") &&
+            __targetList.Items[0].SubItems[4].Text == __state.Items[0].LastChecked!.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss"), "settings shows year in both timestamps");
         SelfTest.Check(__inbox.Nodes.Count == 1, "main only shows unread targets");
         SelfTest.Check(__lastAlertCount == 1 && ReferenceEquals(__tray.Icon, __unreadIcon), "new unread notifies and badges icon");
         await File.AppendAllTextAsync(path, "repeat");
@@ -166,7 +166,7 @@ internal sealed partial class MainWindow
         __verifyFileOpen = null;
         SelfTest.Check(__state.Items[0].Unread == 0, "successful open acknowledges");
         SelfTest.Check(!ReferenceEquals(__tray.Icon, __unreadIcon) && __store.Load().State.History.Count == 2, "read clears badge but preserves history on disk");
-        SelfTest.Check(__inbox.Nodes.Count == 0 && __targetList.Items[0].SubItems[2].Text != "未確認", "read removed from main but settings retains timestamp");
+        SelfTest.Check(__inbox.Nodes.Count == 0 && __targetList.Items[0].SubItems[3].Text != "未確認", "read removed from main but settings retains timestamp");
     }
 
     /// @brief 登録ドロップと再帰設定を登録状態に照らして確認する。
@@ -180,8 +180,8 @@ internal sealed partial class MainWindow
         __settingsTabs.SelectedIndex = 0;
         await RegisterDrop(drop);
         await Scan();
-        SelfTest.Check(__targetList.Items.Count == 2 && __state.Items[1].Recursive && __targetList.Items[1].SubItems[5].Text == "デフォルト", "new folders inherit recursive default");
-        SelfTest.Check(__targetList.Columns[4].Text == "種類" && __targetList.Items[0].SubItems[4].Text == "ファイル" && __targetList.Items[1].SubItems[4].Text == "フォルダ", "targets show registered file and folder kinds");
+        SelfTest.Check(__targetList.Items.Count == 2 && __state.Items[1].Recursive && __targetList.Items[1].SubItems[6].Text == "デフォルト", "new folders inherit recursive default");
+        SelfTest.Check(__targetList.Columns[5].Text == "種類" && __targetList.Items[0].SubItems[5].Text == "ファイル" && __targetList.Items[1].SubItems[5].Text == "フォルダ", "targets show registered file and folder kinds");
         __targetList.Items[0].Selected = false;
         __targetList.Items[1].Selected = true;
         __allRecursive.Checked = true;
@@ -387,7 +387,7 @@ internal sealed partial class MainWindow
     {
         Directory.Move(folder, folder + "-offline");
         await Scan();
-        SelfTest.Check(__targetList.Items[1].SubItems[1].Text == "⚠ 監視失敗" && __targetList.Items[1].BackColor == WatchTheme.FailureSurface && __state.Items[1].Unread == 0, "outage is highlighted, not deletion");
+        SelfTest.Check(__targetList.Items[1].SubItems[2].Text == "⚠ 監視失敗" && __targetList.Items[1].BackColor == WatchTheme.FailureSurface && __state.Items[1].Unread == 0, "outage is highlighted, not deletion");
         // プレビュー要求時だけ、監視失敗の強調表示を画像に残す。
         if (previewDirectory is not null)
         {
@@ -399,7 +399,7 @@ internal sealed partial class MainWindow
         SelfTest.Check(__settingsTabs.SelectedIndex == 0 && __targetList.Visible, "failure link opens targets even from options");
         Directory.Move(folder + "-offline", folder);
         await Scan();
-        SelfTest.Check(__targetList.Items[1].SubItems[1].Text == "正常" && __targetList.Items[1].BackColor == WatchTheme.Surface, "status and color recover after outage");
+        SelfTest.Check(__targetList.Items[1].SubItems[2].Text == "正常" && __targetList.Items[1].BackColor == WatchTheme.Surface, "status and color recover after outage");
         Unregister(__state.Items[1]);
         SelfTest.Check(__targetList.Items.Count == 1 && __addTarget.Visible && Directory.Exists(folder), "row unregister keeps folder on disk and add button available");
     }
