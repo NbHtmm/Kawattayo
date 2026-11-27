@@ -78,6 +78,63 @@ public sealed class MonitoringReducerTests
             new(target.Id, target.Revision, null, new FolderResult(entries), time, null), seen, true)!;
     }
 
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public void Apply_RenotifyOptionControlsAlertsButNeverDropsHistory(bool renotify, int expectedAlerts)
+    {
+        var target = new WatchItem { Path = Path.GetFullPath("sample.txt"), Baseline = ProbeState.Found,
+            Fingerprint = new(5, 2, 10), Unread = 1 };
+        var state = new AppState { Items = [target], RenotifyUnread = renotify };
+        var at = DateTimeOffset.UnixEpoch.AddDays(1);
+        var observation = new WatchObservation(target.Id, 0, new(ProbeState.Found, new(7, 2, 11)), null, at, null);
+        var result = Assert.IsType<ObservationOutcome>(MonitoringReducer.Apply(state, observation, [], false));
+
+        Assert.True(result.UnreadChanged);
+        Assert.True(result.NeedsSave);
+        Assert.Equal(expectedAlerts, result.Alerts.Count);
+        Assert.Empty(result.FileUpdates);
+        Assert.Equal(2, target.Unread);
+        var history = Assert.Single(state.History);
+        Assert.Equal((at, target.Path, "更新"), (history.At, history.Path, history.Kind));
+    }
+
+    [Fact]
+    public void Apply_FolderTimestampOnlyChangeDoesNotCreateFileHook()
+    {
+        string root = Path.GetFullPath("monitored");
+        var at = DateTimeOffset.UnixEpoch.AddDays(1);
+        var target = new WatchItem { Path = root, IsFolder = true, DirectoryStamp = at.AddSeconds(-2).ToFileTime(),
+            Baseline = ProbeState.Found, Inventory = new() };
+        var state = new AppState { Items = [target], RenotifyUnread = true };
+        var folder = new FolderResult(new()) with { DirectoryStamp = at.AddSeconds(-1).ToFileTime() };
+        var result = Assert.IsType<ObservationOutcome>(MonitoringReducer.Apply(
+            state, new(target.Id, 0, null, folder, at, null), [], true));
+
+        Assert.True(result.UnreadChanged);
+        Assert.Empty(result.FileUpdates);
+        Assert.Equal(root, Assert.Single(result.Alerts).Path);
+        Assert.Equal(root, Assert.Single(state.History).Path);
+        Assert.Contains(".", target.PendingFiles.Keys);
+    }
+
+    [Fact]
+    public void Apply_CapsHistoryAndPreservesNewestUpdate()
+    {
+        var at = DateTimeOffset.UnixEpoch.AddDays(1);
+        var target = new WatchItem { Path = Path.GetFullPath("new.txt"), Baseline = ProbeState.Found,
+            Fingerprint = new(5, 2, 10) };
+        var state = new AppState { Items = [target],
+            History = new(Enumerable.Range(0, AppDefaults.HistoryLimit).Select(i => new HistoryEntry(at, $"old-{i}.txt", "更新"))) };
+        MonitoringReducer.Apply(state, new(target.Id, 0, new(ProbeState.Found, new(7, 2, 11)), null, at, null), [], false);
+
+        Assert.Equal(AppDefaults.HistoryLimit, state.History.Count);
+        Assert.Equal("old-1.txt", state.History.Peek().Path);
+        Assert.Equal(target.Path, state.History.Last().Path);
+    }
+
+
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
