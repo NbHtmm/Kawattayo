@@ -21,6 +21,11 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
         [void][IO.Directory]::CreateDirectory((Join-Path $root 'depth'))
         [IO.File]::WriteAllText((Join-Path $root 'depth/deep.txt'),'exists before recursive baseline')
     }
+    if ($Mode -eq 'LowLoadWatcher') {
+        $settings.LowServerLoad = $true
+        [void][IO.Directory]::CreateDirectory((Join-Path $root 'depth'))
+        [IO.File]::WriteAllText((Join-Path $root 'depth/deep.txt'),'initial nested content')
+    }
     $settingsPath = Join-Path $install 'settings.json'
     if (Test-Path -LiteralPath $settingsPath) { throw 'Expected a clean fixture.' }
     [IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 5))
@@ -38,6 +43,7 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
             'History' { Test-SctHistory $p $view $root $evidence }
             'FileLifecycle' { Test-SctFileLifecycle $p $view $file $evidence }
             'PauseResume' { Test-SctPauseResume $p $view $file $evidence }
+            'LowLoadWatcher' { Test-SctLowLoadWatcher $p $view $root $evidence }
             default { throw "Unknown GUI scenario: $Mode." }
         }
     } finally {
@@ -50,6 +56,42 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
     }
 }
 
+
+
+function Test-SctLowLoadWatcher($Process, $View, [string]$Root, [string]$Evidence) {
+    Invoke-SctUiButton $View '設定…'
+    $settings = Wait-SctUi 'settings with change notification subscription' {
+        $window = Get-SctOwnedWindow $Process.Id 'かわったよ | 設定'
+        if ($window -and (Get-SctUiLabel $window '通知待機中')) { $window }
+    }
+    $nested = Join-Path $Root 'depth/deep.txt'
+    $new = Join-Path $Root 'added.txt'
+    [IO.File]::WriteAllText($nested, 'existing file updated in the nested directory')
+    [IO.File]::WriteAllText($new, 'added while subscribed')
+    # Do not invoke a full refresh: both updates must appear during automatic monitoring.
+    $view = Wait-SctUi 'two changes detected automatically using the low-load configuration' {
+        $main = Get-SctMonitorWindow $Process
+        if ($main -and (Get-SctUiLabel $main '未読 2 件')) { $main }
+    }
+    Invoke-SctUiButton $view 'すべて展開'
+    $view = Wait-SctUi 'nested and top-level file rows' {
+        $main = Get-SctMonitorWindow $Process
+        if ($main -and (Get-SctUiLabel $main 'deep.txt を既読にする') -and
+            (Get-SctUiLabel $main 'added.txt を既読にする')) { $main }
+    }
+    Invoke-SctUiButton $view '履歴'
+    $history = Wait-SctUi 'both paths in history' {
+        $window = Get-SctOwnedWindow $Process.Id 'かわったよ | 変更履歴'
+        if ($window -and (Get-SctUiLabel $window $nested) -and (Get-SctUiLabel $window $new)) { $window }
+    }
+    $property = [Windows.Automation.AutomationElement]::NameProperty
+    $scope = [Windows.Automation.TreeScope]::Descendants
+    foreach ($path in $nested,$new) {
+        $hits = @($history.FindAll($scope, [Windows.Automation.PropertyCondition]::new($property, $path)))
+        if ($hits.Count -ne 1) { throw "Expected exactly one history entry for $path." }
+    }
+    [IO.File]::WriteAllText($Evidence, 'PASS: low-load subscription shown for local folder; without manual refresh, two changes appeared exactly once. Actual SMB/network load is not measured.')
+}
 
 function Test-SctPauseResume($Process, $View, [string]$File, [string]$Evidence) {
     Invoke-SctUiButton $View '設定…'
