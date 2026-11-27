@@ -1,4 +1,5 @@
 ﻿. (Join-Path $PSScriptRoot 'Evidence.ps1')
+. (Join-Path $PSScriptRoot 'DesktopSetup.ps1')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -10,19 +11,6 @@ $artifact = $null
 $runnerRevision = @{ commit = $null; hasLocalChanges = $null }
 $packageSource = if ($package) { 'provided' } else { 'built-in-this-run' }
 $status = 0
-
-function Test-GuiSessionAvailable {
-    try {
-        $mutex = $null
-        if ([Threading.Mutex]::TryOpenExisting('Local\ShareFileWatch-v1', [ref]$mutex)) {
-            $mutex.Dispose()
-            return $false
-        }
-    } catch {
-        return $false
-    }
-    return !(Get-Process 'かわったよ','Kawattayo.Avalonia' -ErrorAction SilentlyContinue)
-}
 
 function Invoke-Case([string]$id, [scriptblock]$test) {
     try {
@@ -86,16 +74,22 @@ try {
     $cli = Join-Path $app 'Kawattayo-cli.exe'
     if (!(Test-Path -LiteralPath $gui) -or !(Test-Path -LiteralPath $cli)) { throw 'Package is missing the GUI or CLI executable.' }
 
-    Invoke-Case 'SCT-CLI-001' { Invoke-CheckpointScenario }
-
-    # 排他制御を確認できないときは通常版に触れず、合格にも数えない。
-    if (!(Test-GuiSessionAvailable)) {
-        $message = 'A running instance or an unavailable desktop session prevents a safe GUI launch.'
+    $desktop = Join-Path $out 'desktop'
+    $desktopReady = $false
+    try {
+        Initialize-SctDesktop -Package $package -Directory $desktop
+        $desktopReady = $true
+    } catch {
+        $message = $_.Exception.Message
         $results.Add(@{ id = 'SCT-GUI-001'; outcome = 'BLOCKED'; error = $message })
         Write-Host "BLOCKED SCT-GUI-001: $message"
-    } else {
+    }
+    Invoke-Case 'SCT-CLI-001' { Invoke-CheckpointScenario }
+
+    if ($desktopReady) {
+        $gui = Join-Path $desktop 'かわったよ.exe'
         Invoke-Case 'SCT-GUI-001' {
-            $p = Start-Process -FilePath $gui -ArgumentList '--show-collector' -WorkingDirectory $app -WindowStyle Hidden -PassThru
+            $p = Start-Process -FilePath $gui -ArgumentList '--show-collector' -WorkingDirectory $desktop -WindowStyle Hidden -PassThru
             try {
                 $deadline = [Diagnostics.Stopwatch]::StartNew()
                 while ($deadline.Elapsed.TotalSeconds -lt 15) {
