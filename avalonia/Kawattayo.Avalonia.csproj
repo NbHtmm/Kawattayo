@@ -21,6 +21,7 @@
     <RuntimeHostConfigurationOption Include="System.Globalization.UseNls" Value="true" Condition="'$(KawattayoUseNls)' == 'true'" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
     <ProjectReference Include="../src/Windows/Kawattayo.Windows.csproj" />
+    <InternalsVisibleTo Include="Kawattayo.Core.Tests" />
     <EmbeddedResource Include="../src/Assets/collector.ico" LogicalName="collector.ico" />
     <EmbeddedResource Include="../src/Assets/folder-bell.ico" LogicalName="folder-bell.ico" />
   </ItemGroup>
