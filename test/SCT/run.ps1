@@ -5,6 +5,8 @@ $out = Join-Path $repo ('build/SCT-' + [guid]::NewGuid().ToString('N'))
 $package = $env:KAWATTAYO_SCT_PACKAGE
 $results = [Collections.Generic.List[object]]::new()
 $artifact = $null
+$runnerRevision = @{ commit = $null; hasLocalChanges = $null }
+$packageSource = if ($package) { 'provided' } else { 'built-in-this-run' }
 $status = 0
 
 function Test-GuiSessionAvailable {
@@ -62,6 +64,15 @@ function Invoke-ProductCli([string]$label, [string]$arguments) {
 
 try {
     Push-Location $repo
+    # 提供されたZIPには、試験コードのコミットを製品のコミットとして帰属させない。
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        $revision = git rev-parse --verify HEAD 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $runnerRevision.commit = [string]$revision
+            $changes = @(git status --porcelain 2>$null)
+            if ($LASTEXITCODE -eq 0) { $runnerRevision.hasLocalChanges = $changes.Count -gt 0 }
+        }
+    }
     if (!$package) {
         $package = Join-Path $out 'Kawattayo-test.zip'
         & (Join-Path $repo 'tool/package-avalonia.ps1') -OutputPath $package
@@ -71,7 +82,7 @@ try {
     $stream = [IO.File]::OpenRead($package)
     try { $hash = ([BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '') }
     finally { $stream.Dispose(); $hasher.Dispose() }
-    $artifact = @{ path = $package; sha256 = $hash }
+    $artifact = @{ path = $package; sha256 = $hash; source = $packageSource }
     $app = Join-Path $out 'product'
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::ExtractToDirectory($package, $app)
@@ -135,7 +146,18 @@ try {
     Write-Host "FAIL SCT-SETUP: $($_.Exception.Message)"
     $status = 1
 } finally {
-    $report = @{ artifact = $artifact; results = @($results.ToArray()) }
+    foreach ($result in $results) {
+        $result.testCode = 'test/SCT/run.ps1'
+        if ($result.id -ne 'SCT-SETUP') {
+            $result.specification = 'test/SCT/SPEC.md#' + $result.id.ToLowerInvariant()
+        }
+    }
+    $report = @{
+        schemaVersion = 1
+        runnerRevision = $runnerRevision
+        artifact = $artifact
+        results = @($results.ToArray())
+    }
     $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $out 'result.json') -Encoding UTF8
     Write-Host "SCT reports: $out"
     Pop-Location
