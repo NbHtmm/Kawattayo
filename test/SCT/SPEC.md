@@ -4,6 +4,8 @@ SCTは、**利用者が配布版で目的を達成できるか**を確かめる�
 
 ## ケース一覧
 
+[全ケースの台帳](CASES.md) に未実装・要環境項目も掲載。CLI-002〜006の詳細は [CheckpointSafety.feature](Features/CheckpointSafety.feature)。
+
 | ID | 利用者がしたいこと | 実施方法 |
 |---|---|---|
 | [SCT-CLI-001](#sct-cli-001) | 試験前を基準に、変わったログだけを別フォルダに保存する | 自動 |

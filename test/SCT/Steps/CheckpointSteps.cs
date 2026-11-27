@@ -1,8 +1,7 @@
-using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using Reqnroll;
 using Xunit;
+using static Kawattayo.Sct.Steps.ProductCli;
 
 namespace Kawattayo.Sct.Steps;
 
@@ -13,7 +12,7 @@ public sealed class CheckpointSteps
     private const string FileName = "文書 01.txt";
     private const string Updated = "updated, longer content";
     private const string Existing = "saved evidence from a previous run";
-    private readonly string _work = RequiredEnvironment("KAWATTAYO_SCT_WORK");
+    private readonly string _work = Work;
     private string _root = "";
     private string _destination = "";
     private string _checkpoint = "";
@@ -85,41 +84,4 @@ public sealed class CheckpointSteps
 
     private Task<CliResult> CollectAsync(string label) =>
         RunAsync(label, "collect", "--checkpoint", _checkpoint, "--output", _destination, "--json");
-
-    private async Task<CliResult> RunAsync(string label, params string[] arguments)
-    {
-        var start = new ProcessStartInfo(RequiredEnvironment("KAWATTAYO_SCT_CLI"))
-        {
-            WorkingDirectory = _work, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
-        };
-        foreach (var argument in arguments)
-            start.ArgumentList.Add(argument);
-
-        using var process = Process.Start(start) ?? throw new InvalidOperationException($"Could not start {label}.");
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-        var errors = process.StandardError.ReadToEndAsync(timeout.Token);
-        try
-        {
-            await process.WaitForExitAsync(timeout.Token);
-            var stdout = await output;
-            var stderr = await errors;
-            await File.WriteAllTextAsync(Path.Combine(_work, label + ".stdout.txt"), stdout);
-            await File.WriteAllTextAsync(Path.Combine(_work, label + ".stderr.txt"), stderr);
-            return new CliResult(process.ExitCode, stdout.Trim());
-        }
-        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
-        {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
-            throw new TimeoutException($"The CLI did not finish within 20 seconds: {label}.");
-        }
-    }
-
-    private static string RequiredEnvironment(string name) =>
-        Environment.GetEnvironmentVariable(name) ?? throw new InvalidOperationException($"Run this test with test/run_sct.bat: {name} is missing.");
-
-    private sealed record CliResult(int ExitCode, string Output);
 }

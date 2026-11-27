@@ -25,17 +25,23 @@ function Invoke-Case([string]$id, [scriptblock]$test) {
 }
 
 function Invoke-CheckpointScenario {
-    $env:KAWATTAYO_SCT_WORK = $out
-    $env:KAWATTAYO_SCT_CLI = $cli
-    $messagesPath = Join-Path $out 'cucumber.ndjson'
+    param([string]$CaseId)
+    $caseRoot = Join-Path $out $CaseId
+    [void][IO.Directory]::CreateDirectory($caseRoot)
+    $install = Join-Path $caseRoot 'product'
+    # Each scenario gets an independent SQLite database and unchanged product executable.
+    [IO.Compression.ZipFile]::ExtractToDirectory($package, $install)
+    $env:KAWATTAYO_SCT_WORK = $caseRoot
+    $env:KAWATTAYO_SCT_CLI = Join-Path $install 'Kawattayo-cli.exe'
+    $messagesPath = Join-Path $caseRoot 'cucumber.ndjson'
     $env:REQNROLL_FORMATTERS_MESSAGE = 'outputFilePath=' + $messagesPath
     $project = Join-Path $PSScriptRoot 'Kawattayo.Sct.csproj'
     & dotnet restore $project --locked-mode
     if ($LASTEXITCODE -ne 0) { throw 'SCT package restore failed.' }
 
-    & dotnet test $project --no-restore -p:ReqnrollGenerationTaskFactory=AssemblyTaskFactory --filter 'Category=SCT-CLI-001' --settings (Join-Path $PSScriptRoot 'strict.runsettings') --results-directory $out --logger 'trx;LogFileName=sct.trx'
+    & dotnet test $project --no-restore -p:ReqnrollGenerationTaskFactory=AssemblyTaskFactory --filter "Category=$CaseId" --settings (Join-Path $PSScriptRoot 'strict.runsettings') --results-directory $caseRoot --logger 'trx;LogFileName=sct.trx'
     $exitCode = $LASTEXITCODE
-    $trxPath = Join-Path $out 'sct.trx'
+    $trxPath = Join-Path $caseRoot 'sct.trx'
     if (![IO.File]::Exists($trxPath) -or ![IO.File]::Exists($messagesPath)) {
         throw "SCT evidence is missing (dotnet test exit code: $exitCode)."
     }
@@ -44,7 +50,7 @@ function Invoke-CheckpointScenario {
     if ($exitCode -ne 0 -or $rows.Count -ne 1 -or $rows[0].outcome -ne 'Passed') {
         throw 'The checkpoint scenario did not pass. See sct.trx and cucumber.ndjson.'
     }
-    Assert-SctScenarioEvidence -Path $messagesPath -CaseId 'SCT-CLI-001'
+    Assert-SctScenarioEvidence -Path $messagesPath -CaseId $CaseId
 }
 
 try {
@@ -68,12 +74,18 @@ try {
     try { $hash = ([BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '') }
     finally { $stream.Dispose(); $hasher.Dispose() }
     $artifact = @{ path = $package; sha256 = $hash; source = $packageSource }
-    $app = Join-Path $out 'product'
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::ExtractToDirectory($package, $app)
-    $gui = Join-Path $app 'かわったよ.exe'
-    $cli = Join-Path $app 'Kawattayo-cli.exe'
-    if (!(Test-Path -LiteralPath $gui) -or !(Test-Path -LiteralPath $cli)) { throw 'Package is missing the GUI or CLI executable.' }
+    $zip = [IO.Compression.ZipFile]::OpenRead($package)
+    try {
+        $entryNames = @($zip.Entries.FullName)
+        if ('かわったよ.exe' -cnotin $entryNames -or 'Kawattayo-cli.exe' -cnotin $entryNames) {
+            throw 'Package is missing the GUI or CLI executable.'
+        }
+        $stateNames = @('settings.json','settings.json.bak','cache.json','cache.sqlite3','cache.sqlite3-wal','cache.sqlite3-shm')
+        if (@($entryNames | Where-Object { $_ -in $stateNames }).Count -gt 0) {
+            throw 'The package contains application state and cannot be used as a clean fixture.'
+        }
+    } finally { $zip.Dispose() }
 
     $desktop = Join-Path $out 'desktop'
     $desktopReady = $false
@@ -87,7 +99,9 @@ try {
             Write-Host "BLOCKED ${id}: $message"
         }
     }
-    Invoke-Case 'SCT-CLI-001' { Invoke-CheckpointScenario }
+    foreach ($id in 'SCT-CLI-001','SCT-CLI-002','SCT-CLI-003','SCT-CLI-004','SCT-CLI-005','SCT-CLI-006') {
+        Invoke-Case $id { Invoke-CheckpointScenario -CaseId $id }
+    }
 
     if ($desktopReady) {
         $gui = Join-Path $desktop 'かわったよ.exe'
@@ -117,10 +131,16 @@ try {
 } finally {
     foreach ($result in $results) {
         $result.testCode = 'test/SCT/run.ps1'
-        if ($result.id -eq 'SCT-CLI-001') {
+        if ($result.id -like 'SCT-CLI-*') {
+            $caseId = $result.id
             $result.specification = 'test/SCT/Features/Checkpoint.feature'
             $result.testCode = 'test/SCT/Steps/CheckpointSteps.cs'
-            $result.evidence = @('sct.trx', 'cucumber.ndjson' | Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
+            if ($caseId -ne 'SCT-CLI-001') {
+                $result.specification = 'test/SCT/Features/CheckpointSafety.feature'
+                $result.testCode = 'test/SCT/Steps/CheckpointSafetySteps.cs'
+            }
+            $result.evidence = @('sct.trx', 'cucumber.ndjson' |
+                ForEach-Object { "$caseId/$_" } | Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
         } elseif ($result.id -ne 'SCT-SETUP') {
             if ($result.id -eq 'SCT-GUI-002') {
                 $result.testCode = 'test/SCT/UnreadScenario.ps1'

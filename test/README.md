@@ -26,7 +26,7 @@ Roslynで手書きの関数を署名単位で抽出し、`UT coverage map` に�
 
 ## SCTを追加する
 
-[SCT試験仕様](SCT/SPEC.md) をケース一覧とする。Reqnrollで自動化したケースの目的・前提・操作・期待結果は `SCT/Features/*.feature` に書き、仕様を二重管理しない。ケースIDをシナリオタグに付けて `SCT/Steps/` のC#に接続する。BAT実行後は `result.json` と、手順結果の `cucumber.ndjson`、`sct.trx` を読む。手動ケースは別に実施記録を残す。 UT・SCTともテスト0件は失敗。Reqnrollケースは毎回新しい出力先に、対象IDの完了記録と全手順の合格・対応コードがそろった場合だけ合格とする。SCTのBATはドライランに切り替えない。
+[SCT試験仕様](SCT/SPEC.md) をケース一覧とする。Reqnrollで自動化したケースの目的・前提・操作・期待結果は `SCT/Features/*.feature` に書き、仕様を二重管理しない。ケースIDをシナリオタグに付けて `SCT/Steps/` のC#に接続する。BAT実行後は共通の `result.json` と、ケースID別の `cucumber.ndjson`、`sct.trx` を読む。手動ケースは別に実施記録を残す。 UT・SCTともテスト0件は失敗。Reqnrollケースは毎回新しい出力先に、対象IDの完了記録と全手順の合格・対応コードがそろった場合だけ合格とする。SCTのBATはドライランに切り替えない。
 
 SCTは `--smoke` を使用せず、本番と同じEXEに対して、起動引数・終了コード・ファイル・画面など外から見える結果を検証する。`result.json` のケースIDに対応させる。比較種別、上書き拒否、CLIとGUIの保存領域共有、画面操作、実SMB、通知バナーを別シナリオとする。GUI操作を拡張するなら FlaUI/UIA3 と固定の `AutomationId` を使い、座標クリックや固定時間待ちは避ける。実SMBと通知バナーはこの初期版の対象外。
 
@@ -36,4 +36,4 @@ SCTは `--smoke` を使用せず、本番と同じEXEに対して、起動引数
 - 次段階：[Roslyn](https://learn.microsoft.com/en-us/dotnet/csharp/roslyn-sdk/get-started/semantic-analysis) で関数の対応漏れを検査。[ReportGenerator](https://github.com/danielpalme/ReportGenerator) は結果をHTMLで見たい場合に追加。[FlaUI](https://github.com/FlaUI/FlaUI) は配布EXEのGUI操作を増やす段階で導入する。
 - [Avalonia Headless](https://docs.avaloniaui.net/docs/testing/setting-up-the-headless-platform) は画面ロジックの補助テスト用。実行ファイルをWindows上で操作するSCTの代わりにはしない。
 
-現在の範囲は既存のUT 2シナリオと、配布版のGUI起動・CLIの作成／差分／保存のSCT 2ケース。関数台帳と全関数へのテスト追加、FlaUIによる操作の自動化は未導入。
+現在の範囲はUT（[対象範囲](COVERAGE.md)）と、配布版のGUI起動・CLIの作成／差分／保存のSCT 2ケース。関数台帳と全関数へのテスト追加、FlaUIによる操作の自動化は未導入。
