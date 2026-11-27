@@ -1,4 +1,5 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿. (Join-Path $PSScriptRoot 'FunctionTrace.ps1')
+$ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $out = Join-Path $repo ('build/UT-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($out)
@@ -31,8 +32,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Failed to generate the source function inventory.' }
     dotnet test test/UT/Kawattayo.Core.Tests.csproj -c Release -p:RestoreLockedMode=true -p:UseSharedCompilation=false --settings test/UT/coverage.runsettings --results-directory $out --logger 'trx;LogFileName=result.trx' --collect 'XPlat Code Coverage'
     $status = $LASTEXITCODE
+    $resultPath = Join-Path $out 'result.trx'
+    if (Test-Path -LiteralPath $resultPath) {
+        [xml]$trx = Get-Content -LiteralPath $resultPath -Raw
+        Write-UtFunctionTrace $trx (Join-Path $out 'functions.csv') (Join-Path $PSScriptRoot 'function-assertions.csv') (Join-Path $out 'function-trace.csv')
+    }
     if ($status -eq 0) {
-        [xml]$trx = Get-Content -LiteralPath (Join-Path $out 'result.trx') -Raw
+        if (!$trx) { throw 'UT result TRX missing.' }
         $counters = $trx.SelectSingleNode("//*[local-name()='Counters']")
         if (!$counters -or [int]$counters.executed -lt 1) { throw 'No unit tests executed.' }
         if (!(Get-ChildItem -LiteralPath $out -Filter 'coverage.cobertura.xml' -Recurse)) { throw 'Coverage report missing.' }

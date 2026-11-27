@@ -1,0 +1,30 @@
+source,signature,test_class,test_method,minimum_cases
+cli/Program.cs,Program.Describe(CheckpointDifference change),ProgramTests,Describe_UsesDistinctLabelsAndIncludesTheError,4
+cli/Program.cs,"Program.Changes(Utf8JsonWriter writer, IEnumerable<CheckpointDifference> changes)",ProgramTests,Changes_WritesOrderedStableKindsAndOnlyPresentErrors,1
+cli/Program.cs,"Program.Copies(Utf8JsonWriter writer, DownloadResult[] copies, CheckpointDifference[] unknown)",ProgramTests,Copies_SeparatesSavedFailedAndUnconfirmedOutcomes,1
+cli/Program.cs,Program.Options.Has(string key),ProgramTests,Options_PreservesUnicodeAndSpacesAndCollectsRepeatedExclusionsInOrder,1
+cli/Program.cs,Program.Options.All(string key),ProgramTests,Options_PreservesUnicodeAndSpacesAndCollectsRepeatedExclusionsInOrder,1
+cli/Program.cs,Program.Options.One(string key),ProgramTests,One_RequiresTheNamedValueAndDoesNotTreatEmptySpellingAsMissing,1
+cli/Program.cs,"Program.Options.Options(string[] args, string[] fields, string[] flags)",ProgramTests,Options_RejectsUnknownMissingAndRepeatedNonrepeatableArguments,1
+"avalonia/Bootstrap/DesktopIdentity.cs","ShareFileWatch.DesktopIdentity.WindowTitle.get","ShareFileWatch.DesktopIdentityTests","WindowTitle_ReportsTheRunningGuiAssemblyVersion","1"
+"src/Core/FileExclusions.cs","ShareFileWatch.FileExclusions.Parse(string text)","FileExclusionsTests","Parse_TrimsMixedNewlinesAndRemovesCaseInsensitiveDuplicates","1"
+"src/Core/FileExclusions.cs","ShareFileWatch.FileExclusions.Parse(string text)","FileExclusionsTests","Parse_RejectsNonFileNames","3"
+"src/Core/FileExclusions.cs","ShareFileWatch.FileExclusions.Normalize(IEnumerable<string>? patterns)","FileExclusionsTests","Normalize_DropsInvalidPatternsAndHandlesMissingList","1"
+"src/Core/FileExclusions.cs","ShareFileWatch.FileExclusions.Same(string[]? left, string[] right)","FileExclusionsTests","Same_IgnoresOrderAndCaseButNotDifferentPatterns","1"
+"src/Core/FileExclusions.cs","ShareFileWatch.FileExclusions.Matches(string path, string[]? patterns)","FileExclusionsTests","Matches_ChecksOnlyFileName","4"
+"src/Core/FileExclusions.cs","ShareFileWatch.FileExclusions.Matches(string path, string[]? patterns)","FileExclusionsTests","Matches_NoPatternsDoesNotExcludeFile","1"
+"src/Core/FolderComparison.cs","ShareFileWatch.FolderComparison.Compare(Dictionary<string, Fingerprint> before, Dictionary<string, Fingerprint> after,         DateTimeOffset now, string[]? previouslyExcluded = null, string[]? nowExcluded = null)","FolderComparisonTests","Compare_ReportsAddedUpdatedAndRemovedWithoutCaseOnlyChanges","1"
+"src/Core/FolderComparison.cs","ShareFileWatch.FolderComparison.Compare(Dictionary<string, Fingerprint> before, Dictionary<string, Fingerprint> after,         DateTimeOffset now, string[]? previouslyExcluded = null, string[]? nowExcluded = null)","FolderComparisonTests","Compare_ExclusionChangesAreNotFileChanges","1"
+"src/Core/FolderComparison.cs","ShareFileWatch.FolderComparison.Summary(List<FileChange> changes)","FolderComparisonTests","Summary_ShowsCountsAndLimitsPreviewToThreeShortPaths","1"
+"src/Core/Monitoring/PendingPathLookup.cs","ShareFileWatch.PendingPathLookup.Contains(string path)","PendingPathLookupTests","Contains_FindsNestedUnreadInRegisteredAncestor","1"
+"src/Core/Monitoring/PendingPathLookup.cs","ShareFileWatch.PendingPathLookup.Contains(string path)","PendingPathLookupTests","Contains_RecognizesFolderItselfAndIndividualFileOnlyWhileUnread","1"
+"src/Core/Monitoring/SettledNotifications.cs","ShareFileWatch.SettledNotifications.Observe(Guid id, bool available, long now, long delayMs, Func<string, Fingerprint?> fingerprint,         Func<string, bool> unread, Action<string, string> alert)","SettledNotificationsTests","Observe_NewVersionAndUnavailableIntervalRestartTheWait","1"
+"src/Core/Monitoring/SettledNotifications.cs","ShareFileWatch.SettledNotifications.Observe(Guid id, bool available, long now, long delayMs, Func<string, Fingerprint?> fingerprint,         Func<string, bool> unread, Action<string, string> alert)","SettledNotificationsTests","Observe_ReadAndMissingFilesAreDropped","2"
+"src/Core/Monitoring/SettledNotifications.cs","ShareFileWatch.SettledNotifications.Queue(Guid id, string path, string relative, string kind)","SettledNotificationsTests","Queue_ReplacesCaseVariantAndOnlyEmitsLatestKind","1"
+"src/Core/Monitoring/SettledNotifications.cs","ShareFileWatch.SettledNotifications.Remove(Guid id, string relative)","SettledNotificationsTests","Remove_LastEntryDropsOnlyItsOwnRegistration","1"
+"src/Core/Monitoring/SettledNotifications.cs","ShareFileWatch.SettledNotifications.Retain(IReadOnlySet<Guid> retained)","SettledNotificationsTests","RemoveAndRetain_KeepOnlyRegisteredPendingFiles","1"
+"src/Core/Monitoring/SettledNotifications.cs","ShareFileWatch.SettledNotifications.Invalidate()","SettledNotificationsTests","Invalidate_DiscardsPreviousStabilitySample","1"
+"src/Windows/LocalDownloads.cs","ShareFileWatch.LocalDownloads.CanOpen(string path)","LocalDownloadsTests","CanOpen_UsesFinalExtensionAndOnlyAllowsSupportedDocuments","6"
+"src/Windows/WindowsAppPaths.cs","ShareFileWatch.WindowsAppPaths.Settings.get","WindowsAppPathsTests","SettingsAndCachePaths_AreBothUnderTheSuppliedDistributionFolder","1"
+"src/Windows/WindowsAppPaths.cs","ShareFileWatch.WindowsAppPaths.Cache.get","WindowsAppPathsTests","SettingsAndCachePaths_AreBothUnderTheSuppliedDistributionFolder","1"
+"src/Windows/Monitoring/UpdateHooks.cs","ShareFileWatch.UpdateHooks.StartInfo(HookRule rule, string path)","ShareFileWatch.UpdateHooksTests","StartInfo_PreservesArgumentBoundariesAndWorkingDirectory","1"
