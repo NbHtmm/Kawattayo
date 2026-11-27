@@ -27,6 +27,8 @@ internal static class SelfTest
                 TestPortableStore(root.FullName, lines);
                 TestCacheExclusion(root.FullName, lines);
                 TestUserExclusions(root.FullName, lines);
+                InventoryTests.VerifyBulkFileRemoval(root.FullName);
+                lines.Add("PASS: 2,000 removals, candidate isolation and missing-root handling");
                 TestDisk(root.FullName, lines);
                 TestFolders(root.FullName, lines, "local");
                 TestSmb(root.FullName, lines);

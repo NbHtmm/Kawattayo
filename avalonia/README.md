@@ -1,4 +1,4 @@
-# かわったよ Avalonia 版（v0.2.0）
+# かわったよ Avalonia 版（v0.2.1）
 
 Windows 11 x64 用の別ビルドです。Native AOT の配布 ZIP を展開し、
 `かわったよ.exe` を実行します。別途 .NET ランタイムや SQLite のインストールは不要です。
@@ -31,7 +31,7 @@ v0.1.3 以前の `cache.json` は読み込みません。実際の監視パス�
 .\tool\package-avalonia.ps1
 ```
 
-出力は `build/Kawattayo_v0.2.0_Avalonia_Windows_x64.zip` です。
+出力は `build/Kawattayo_v0.2.1_Avalonia_Windows_x64.zip` です。
 `-p:KawattayoUseNls=true` は比較用。標準設定では Windows の ICU を使います。
 NLS にしても Skia・HarfBuzz の DLL は不要にはなりません。
 

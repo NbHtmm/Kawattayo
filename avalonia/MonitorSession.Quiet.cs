@@ -106,7 +106,7 @@ internal sealed partial class MonitorSession
         return bindings;
     }
 
-    internal void ResetQuietScan()
+    private void ResetQuietScan()
     {
         foreach (var feed in __feeds.Values) feed.Retire();
         __feeds.Clear(); __checks.Clear();

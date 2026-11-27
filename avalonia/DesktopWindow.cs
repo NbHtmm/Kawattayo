@@ -8,6 +8,7 @@ using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 
 namespace ShareFileWatch;
 
@@ -22,6 +23,7 @@ internal sealed partial class DesktopWindow : Window
     private readonly TextBox __filter = new() { PlaceholderText = "履歴を検索", Width = 220 };
     private readonly HashSet<string> __expanded = new(StringComparer.OrdinalIgnoreCase);
     private bool __closing, __closed;
+    private bool __inboxDirty = true, __targetsDirty = true, __historyDirty = true;
     private int __inboxSort, __targetSort, __historySort = 1;
     private bool __inboxReverse, __targetReverse, __historyReverse = true;
 
@@ -49,13 +51,16 @@ internal sealed partial class DesktopWindow : Window
         __tabs.Items.Add(new TabItem { Header = "設定", Content = BuildPreferences() });
         __tabs.Items.Add(new TabItem { Header = "履歴", Content = BuildHistory() });
         __tabs.KeyDown += Keyboard;
+        __tabs.SelectionChanged += (_, e) => { if (ReferenceEquals(e.Source, __tabs)) RefreshVisibleList(); };
         __inbox.SelectionChanged += (_, _) => __details.Text = Selected(__inbox).FirstOrDefault() is { } row
             ? $"{row.Path}  ｜  {row.Detail}  ｜  最終更新者：取得不可" : "";
         foreach (var list in new[] { __inbox, __targets, __history })
             list.DoubleTapped += async (_, e) =>
             {
-                if (e.Source is Button) return;
-                if (Selected(list).FirstOrDefault() is { } row) await OpenRow(row, parent: false);
+                // 複数選択中も、クリックした行だけを開く。展開ボタンでは開かない。
+                if (e.Source is not Control origin || origin.FindAncestorOfType<Button>(includeSelf: true) is not null) return;
+                if (origin.FindAncestorOfType<ListBoxItem>(includeSelf: true)?.DataContext is Row row)
+                    await OpenRow(row, parent: false);
             };
         var page = new DockPanel { Margin = new Thickness(14, 10) };
         var header = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new Thickness(0, 0, 0, 10) };
@@ -69,7 +74,7 @@ internal sealed partial class DesktopWindow : Window
         Styles.Add(new Style(x => x.OfType<ListBoxItem>()) { Setters = { new Setter(ContentControl.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch) } });
         ApplyAppearance();
         __monitor.RowsChanged += Refresh;
-        __monitor.ProgressChanged += () => { RefreshStatus(); if (__tabs.SelectedIndex == 1) RefreshTargets(); };
+        __monitor.ProgressChanged += RefreshStatus;
         __monitor.Alerts += __native.Notify;
         Opened += (_, _) =>
         {
@@ -81,7 +86,7 @@ internal sealed partial class DesktopWindow : Window
         };
         PropertyChanged += (_, args) =>
         {
-            if (args.Property == WindowStateProperty && WindowState == WindowState.Minimized && __state.KeepInTray && !__closing)
+            if (args.Property == WindowStateProperty && WindowState == WindowState.Minimized && __native.IsVisible && !__closing)
                 Dispatcher.UIThread.Post(Hide);
         };
         Closing += (_, e) =>
@@ -89,7 +94,7 @@ internal sealed partial class DesktopWindow : Window
             if (__closed) return;
             e.Cancel = true;
             if (__closing) return;
-            if (__state.KeepInTray) { Hide(); return; }
+            if (__native.IsVisible) { Hide(); return; }
             Dispatcher.UIThread.Post(async () => await CloseFully());
         };
         Closed += (_, _) => __native.Dispose();
@@ -151,61 +156,24 @@ internal sealed partial class DesktopWindow : Window
         return Panel(__history, Bar(__filter, Button("名前", () => Sort(__history, 0)), Button("検知時刻", () => Sort(__history, 1))));
     }
 
-    private Control BuildPreferences()
+    private void Refresh(bool unreadChanged)
     {
-        var body = new StackPanel { Spacing = 10, Margin = new Thickness(2, 8) };
-        var seconds = new NumericUpDown { Minimum = AppDefaults.MinimumPollSeconds, Maximum = AppDefaults.MaximumPollSeconds, Increment = 5, Value = __state.PollSeconds, Width = 125 };
-        seconds.ValueChanged += (_, _) => { if (seconds.Value is { } v) { __state.PollSeconds = (int)v; __monitor.UpdateSettings(); } };
-        var size = new NumericUpDown { Minimum = 9, Maximum = 22, Value = Math.Clamp(__state.TextSizePoints, 9, 22), Width = 125 };
-        size.ValueChanged += (_, _) => { if (size.Value is { } v) { __state.TextSizePoints = (int)v; ApplyAppearance(); __monitor.UpdateSettings(); } };
-        body.Children.Add(Bar(new TextBlock { Text = "監視間隔（秒）", VerticalAlignment = VerticalAlignment.Center }, seconds));
-        body.Children.Add(Bar(new TextBlock { Text = "文字サイズ（pt）", VerticalAlignment = VerticalAlignment.Center }, size));
-        body.Children.Add(Bar(Button("照会を中断 / 再開", __monitor.PauseOrResume)));
-        body.Children.Add(Option("通知領域に常駐", __state.KeepInTray, v => { __state.KeepInTray = v; __native.SetVisible(v); }));
-        body.Children.Add(Option("常に最前面", __state.Pinned, v => { __state.Pinned = v; Topmost = v; }));
-        body.Children.Add(Option("ダークモード", __state.DarkMode, v => { __state.DarkMode = v; ApplyAppearance(); }));
-        body.Children.Add(Option("サーバー負荷を抑える", __state.LowServerLoad, v => { __state.LowServerLoad = v; __monitor.ResetQuietScan(); }, true));
-        body.Children.Add(Option("登録フォルダ自身の更新日時も監視", __state.WatchDirectoryTime, v => { __state.WatchDirectoryTime = v; __monitor.ResetQuietScan(); }, true));
-        body.Children.Add(Option("フォルダを再帰監視する（既定）", __state.RecursiveFolders != false, v =>
-        {
-            __state.RecursiveFolders = v;
-            foreach (var item in __state.Items.Where(i => i.IsFolder && i.RecursiveOverride is null)) item.SetRecursive(v);
-            __monitor.ResetQuietScan();
-        }, true));
-        body.Children.Add(Option("ファイルの削除を通知する", __state.NotifyDeleted, v => __state.NotifyDeleted = v));
-        body.Children.Add(Option("ファイル・フォルダを開いたら既読にする", __state.ReadOnFileOpen, v => __state.ReadOnFileOpen = v));
-        body.Children.Add(Option("未読のファイルも更新のたびに通知する", __state.RenotifyUnread, v => __state.RenotifyUnread = v));
-        body.Children.Add(new TextBlock { Text = "除外するファイル名（1行に1つ、* と ? が使えます）" });
-        var rules = new TextBox { AcceptsReturn = true, MinHeight = 74, Text = string.Join(Environment.NewLine, __state.ExcludedFilePatterns) };
-        body.Children.Add(rules);
-        body.Children.Add(Bar(Button("除外ルールを適用", () => SetExclusions(rules.Text ?? "")),
-            Button("Officeの一時ファイルを追加", () =>
-            {
-                var text = rules.Text ?? "";
-                if (!text.Split('\n').Any(x => x.Trim() == "~$*")) rules.Text = text.TrimEnd() + Environment.NewLine + "~$*";
-            })));
-        return new ScrollViewer { Content = body };
-    }
-
-    private CheckBox Option(string title, bool set, Action<bool> changed, bool scan = false)
-    {
-        var box = new CheckBox { Content = title, IsChecked = set };
-        box.IsCheckedChanged += (_, _) => { changed(box.IsChecked == true); __monitor.UpdateSettings(scan); };
-        return box;
-    }
-
-    private void ApplyAppearance()
-    {
-        RequestedThemeVariant = __state.DarkMode ? ThemeVariant.Dark : ThemeVariant.Light;
-        FontSize = Math.Clamp(__state.TextSizePoints, 9, 22) * 4.0 / 3;
-        Topmost = __state.Pinned;
-    }
-
-    private void Refresh(bool full)
-    {
-        RefreshTargets();
-        if (full) { RefreshInbox(); RefreshHistory(); }
+        __targetsDirty = true;
+        __inboxDirty |= unreadChanged;
+        __historyDirty |= unreadChanged;
+        RefreshVisibleList();
         RefreshStatus();
+    }
+
+    // 非表示タブは切り替え時に作る。大量の履歴や未読があっても他の操作をブロックしない。
+    private void RefreshVisibleList()
+    {
+        switch (__tabs.SelectedIndex)
+        {
+            case 0 when __inboxDirty: RefreshInbox(); break;
+            case 1 when __targetsDirty: RefreshTargets(); break;
+            case 3 when __historyDirty: RefreshHistory(); break;
+        }
     }
 
     private void RefreshStatus()
@@ -222,7 +190,13 @@ internal sealed partial class DesktopWindow : Window
         if (__closing) return;
         __closing = true;
         try { await __monitor.Close(); }
-        catch (IOException error) { WinDesktop.Message(error.Message, Handle); }
+        catch (IOException error)
+        {
+            __closing = false;
+            ShowFromTray();
+            WinDesktop.Message("保存できなかったため終了していません。保存先を確認してから、もう一度終了してください。\n" + error.Message, Handle);
+            return;
+        }
         __closed = true;
         Close();
     }

@@ -13,6 +13,7 @@ internal sealed class WinDesktop : IDisposable
     private nint handle, icon;
     private uint taskbarCreated;
     private bool active;
+    internal bool IsVisible => active;
 
     internal WinDesktop(Window window, Action show, Action scan, Action quit)
     {
@@ -57,6 +58,8 @@ internal sealed class WinDesktop : IDisposable
         {
             active = false;
             SetVisible(true);
+            // Explorer再起動で通知領域へ戻せないときは、画面を復帰させる。
+            if (!active) Avalonia.Threading.Dispatcher.UIThread.Post(show);
         }
         if (msg != CallbackMessage) return 0;
         handled = true;

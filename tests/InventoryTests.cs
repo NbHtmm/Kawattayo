@@ -71,6 +71,21 @@ internal static class InventoryTests
     }
 
 
+    internal static void VerifyBulkFileRemoval(string root)
+    {
+        string dir = Directory.CreateDirectory(Path.Combine(root, "bulk-removal")).FullName;
+        const int entries = 8_000, removed = 2_000;
+        var baseline = new Dictionary<string, Fingerprint>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < entries; i++) baseline.Add($"file-{i}.txt", new(1, 2, 3));
+        string[] notices = Enumerable.Range(0, removed).Select(i => Path.Combine(dir, $"file-{i}.txt")).ToArray();
+        var result = FolderProbe.ReadChanges(dir, true, baseline, notices, _ => false, default);
+        SelfTest.Check(result.Files?.Count == entries - removed && baseline.Count == entries, "large removal keeps baseline untouched");
+        var offline = FolderProbe.ReadChanges(Path.Combine(dir, "offline"), true, baseline,
+            [Path.Combine(dir, "offline", "file-0.txt")], _ => false, default);
+        SelfTest.Check(offline.Files is null, "missing root is not published as a deletion");
+    }
+
+
     internal static int Scale()
     {
         using var fixture = Directory.CreateTempSubdirectory("KawattayoSQLite-").AsFixture();

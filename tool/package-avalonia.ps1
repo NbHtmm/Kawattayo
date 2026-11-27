@@ -45,7 +45,7 @@ try {
         'licenses/HarfBuzzSharp-NOTICES.txt' = Find-PackageFile 'HarfBuzzSharp.NativeAssets.Win32' 'THIRD-PARTY-NOTICES.txt'
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $output = Join-Path $root 'build/Kawattayo_v0.2.0_Avalonia_Windows_x64.zip'
+    $output = Join-Path $root 'build/Kawattayo_v0.2.1_Avalonia_Windows_x64.zip'
     $temporary = $output + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
     try {
         $archive = [IO.Compression.ZipFile]::Open($temporary, [IO.Compression.ZipArchiveMode]::Create)

@@ -92,6 +92,7 @@ internal static class FolderProbe
     {
         var files = new Dictionary<string,Fingerprint>(baseline, StringComparer.OrdinalIgnoreCase);
         HashSet<string>? formerFolders = null;
+        bool sawMissing = false;
         try
         {
             var covered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -112,8 +113,10 @@ internal static class FolderProbe
                 try { attributes = File.GetAttributes(path); }
                 catch (IOException ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
                 {
-                    if (!Directory.Exists(root)) return new(null,"登録フォルダに接続できません");
-                    RemoveTree(relative); covered.Add(relative); continue;
+                    sawMissing = true;
+                    RemoveTree(relative);
+                    covered.Add(relative);
+                    continue;
                 }
                 if (attributes.HasFlag(FileAttributes.ReparsePoint)) { RemoveTree(relative); covered.Add(relative); continue; }
                 if (attributes.HasFlag(FileAttributes.Directory))
@@ -136,6 +139,9 @@ internal static class FolderProbe
                 }
                 if (files.Count > EntryLimit) return new(null,"監視範囲の上限を超えました。");
             }
+            // 消失ごとに共有ルートへ再照会しない。一覧を公開する前に一度だけ通信断を確認する。
+            cancellation.ThrowIfCancellationRequested();
+            if (sawMissing && !Directory.Exists(root)) return new(null, "登録フォルダに接続できません");
             return new(files);
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException) { return new(null,ex.Message); }
@@ -156,8 +162,8 @@ internal static class FolderProbe
 
         void RemoveTree(string relative)
         {
-            files.Remove(relative);
-            if (!recursive) return;
+            // 前回が通常ファイルなら子孫は存在しない。大量削除で毎回全件走査しない。
+            if (files.Remove(relative) || !recursive || !WasFolder(relative)) return;
             string prefix = relative + Path.DirectorySeparatorChar;
             foreach (var key in files.Keys.Where(k => k.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)).ToArray()) files.Remove(key);
         }

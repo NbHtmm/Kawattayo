@@ -76,7 +76,6 @@ internal sealed partial class DesktopWindow
     {
         item.RecursiveOverride = overrideValue;
         item.SetRecursive(overrideValue ?? (__state.RecursiveFolders != false));
-        __monitor.ResetQuietScan();
         __monitor.UpdateSettings(true);
     }
 
@@ -85,7 +84,6 @@ internal sealed partial class DesktopWindow
         var targets = items.DistinctBy(x => x.Id).ToArray();
         if (targets.Length == 0 || !WinDesktop.Confirm($"{targets.Length}件の監視登録を解除しますか？ 実ファイルは削除しません。", Handle)) return;
         foreach (var target in targets) __state.Items.Remove(target);
-        __monitor.ResetQuietScan();
         __monitor.UpdateSettings(true);
     }
 
@@ -103,7 +101,6 @@ internal sealed partial class DesktopWindow
                     FileExclusions.Matches(x.Relative, rules)).ToArray())
                     item.AcknowledgeFile(change);
             }
-            __monitor.ResetQuietScan();
             __monitor.UpdateSettings(true);
         }
         catch (ArgumentException error) { WinDesktop.Message(error.Message, Handle); }

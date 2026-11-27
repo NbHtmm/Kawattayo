@@ -2,73 +2,65 @@ using Avalonia.Threading;
 
 namespace ShareFileWatch;
 
-// 画面とは分離して巡回・履歴・バックグラウンド保存を管理する。状態の変更は UI スレッドで行う。
+// 巡回・表示への通知・保存要求を調整する。観測の反映はUIスレッドに限定する。
 internal sealed partial class MonitorSession
 {
     private readonly StateStore __store;
     private readonly AppState __state;
+    private readonly SnapshotWriter __writer;
     private readonly DispatcherTimer __pollTimer = new();
-    private bool __exiting, __hasUnsavedChanges;
-    private long __saveRevision;
-    private Task? __saveWorker;
-    private string? __saveError;
+    private bool __closing;
     private DateTimeOffset? __lastPoll;
 
     internal MonitorSession(StateStore store)
     {
         __store = store;
         (__state, StartupWarning) = store.Load();
+        __writer = new(__state.CaptureForSave, __store.Save, UpdateStatus);
         __pollTimer.Tick += async (_, _) => await Scan(automatic: true);
-        __progressTimer.Tick += (_, _) => RefreshProgressCells();
         __scanFlush.Tick += (_, _) => FlushScanUpdates();
     }
 
     internal AppState State => __state;
     internal StateStore Store => __store;
     internal string? StartupWarning { get; }
-    internal Action<bool>? RowsChanged;
-    internal Action? ProgressChanged;
-    internal Action<List<string>>? Alerts;
-    internal bool IsScanning => __activeScanRoots.Count > 0;
-    internal string Status => __saveError is not null ? "保存に失敗：" + __saveError :
+    internal event Action<bool>? RowsChanged;
+    internal event Action? ProgressChanged;
+    internal event Action<IReadOnlyList<string>>? Alerts;
+    private bool IsScanning => __activeScanRoots.Count > 0;
+    internal string Status => __writer.Error is string error ? "保存に失敗：" + error :
         __pollError ?? (__state.Paused ? "一時停止中" : IsScanning ? $"照会中 {__activeScanRoots.Count}系統" :
             __state.Items.Count == 0 ? "監視対象を追加してください" : __lastPoll is { } at ? $"最終巡回 {at:HH:mm:ss}" : "監視中");
 
-    private bool IsDisposed => __exiting;
-    private void RefreshRows(bool inboxChanged) => RowsChanged?.Invoke(inboxChanged);
-    private void RefreshProgressCells() => ProgressChanged?.Invoke();
     private void UpdateStatus() => ProgressChanged?.Invoke();
-    private void RefreshHistory() { }
-    private void NotifyNewChanges(List<string> alerts) { if (alerts.Count > 0) Alerts?.Invoke(alerts); }
     private static string DisplayName(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } name ? name : path;
 
+    // 監視条件の変更は、すでに待機中の照会にも適用する。旧条件で読んだ結果は捨てる。
     internal void UpdateSettings(bool rescan = false)
     {
-        Save();
+        if (rescan) StopScans();
+        __writer.Enqueue();
         RowsChanged?.Invoke(true);
-        if (rescan) StartTimer(immediate: true);
-        else StartTimer();
+        if (rescan || !__pollTimer.IsEnabled) StartTimer(immediate: rescan);
+    }
+
+    internal void ApplyPollInterval(int seconds)
+    {
+        __state.PollSeconds = seconds;
+        UpdateSettings();
+        StartTimer();
     }
 
     internal void PauseOrResume()
     {
-        if (__state.Paused)
-        {
-            __state.Paused = false;
-            StartTimer(immediate: true);
-        }
-        else
-        {
-            __state.Paused = true;
-            StopScans();
-        }
-        UpdateSettings();
-        if (!__state.Paused) StartTimer(immediate: true);
+        __state.Paused = !__state.Paused;
+        UpdateSettings(rescan: true);
     }
 
     private void StopScans()
     {
         __scanGeneration++;
+        __pollError = null;
         __pollTimer.Stop();
         ResetQuietScan();
         foreach (var scan in __runningScans) scan.Cancel();
@@ -77,36 +69,16 @@ internal sealed partial class MonitorSession
     internal async Task Close()
     {
         FlushScanUpdates();
-        __exiting = true;
+        __closing = true;
         StopScans();
         __scanFlush.Stop();
-        __progressTimer.Stop();
-        if (__hasUnsavedChanges) Save();
-        if (__saveWorker is not null) await __saveWorker;
-        if (__saveError is not null) throw new IOException(__saveError);
-    }
-
-    private void Save()
-    {
-        __hasUnsavedChanges = true;
-        __saveRevision++;
-        if (__saveWorker is null || __saveWorker.IsCompleted) __saveWorker = SavePendingAsync();
-    }
-
-    private async Task SavePendingAsync()
-    {
-        while (__hasUnsavedChanges)
+        try { await __writer.FlushAsync(); }
+        catch
         {
-            var revision = __saveRevision;
-            var snapshot = __state.CaptureForSave();
-            __saveError = await Task.Run(() =>
-            {
-                try { __store.Save(snapshot); return null; }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return ex.Message; }
-            });
-            __hasUnsavedChanges = __saveError is not null || revision != __saveRevision;
-            UpdateStatus();
-            if (revision == __saveRevision) break;
+            // 保存できなければウィンドウを閉じない。修復後の再試行まで未保存の状態を残す。
+            __closing = false;
+            StartTimer(immediate: true);
+            throw;
         }
     }
 }

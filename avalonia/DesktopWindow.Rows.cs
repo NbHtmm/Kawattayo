@@ -32,7 +32,7 @@ internal sealed partial class DesktopWindow
         {
             var toggle = Button(row.Expanded ? "▾" : "▸", () => Toggle(row.Branch));
             toggle.MinWidth = 23; toggle.Padding = new Thickness(2, 0); toggle.Focusable = false;
-            Automation.SetLabel(toggle, row.Expanded ? "折りたたむ" : "展開する");
+            Avalonia.Automation.AutomationProperties.SetName(toggle, row.Expanded ? "折りたたむ" : "展開する");
             DockPanel.SetDock(toggle, Dock.Left); name.Children.Add(toggle);
         }
         var icon = new TextBlock { Text = row.Folder ? "📁" : "📄", Margin = new Thickness(2, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -55,18 +55,18 @@ internal sealed partial class DesktopWindow
         Grid.SetColumn(columns, source == __targets ? 2 : 1);
         line.Children.Add(columns);
         ToolTip.SetTip(name, $"{row.Name}\n{row.Path}\n{row.Detail}");
-        line.ContextMenu = BuildRowMenu(row, source);
+        // 通常の一覧表示ではメニューを作らず、右クリックやメニューキーで必要になった時だけ組み立てる。
+        line.ContextRequested += (_, e) =>
+        {
+            BuildRowMenu(row, source).Open(line);
+            e.Handled = true;
+        };
         line.PointerPressed += (_, e) =>
         {
             if (e.GetCurrentPoint(line).Properties.IsRightButtonPressed && !Selected(source).Any(r => r.Key == row.Key))
                 source.SelectedItem = row;
         };
         return line;
-    }
-
-    private static class Automation
-    {
-        internal static void SetLabel(Control control, string name) => Avalonia.Automation.AutomationProperties.SetName(control, name);
     }
 
     private ContextMenu BuildRowMenu(Row row, ListBox list)
@@ -103,6 +103,7 @@ internal sealed partial class DesktopWindow
 
     private void RefreshTargets()
     {
+        __targetsDirty = false;
         var rows = __state.Items.Select(item =>
         {
             int? count = item.IsFolder ? item.Inventory?.Count :
@@ -110,7 +111,7 @@ internal sealed partial class DesktopWindow
                 item.Baseline is null ? null : item.Baseline == ProbeState.Found ? 1 : 0;
             var state = item.Error is not null ? "監視失敗" : count is null ? "未照会" : count == 0 ? "対象なし" : "正常";
             var scope = !item.IsFolder ? "ファイル" : item.Recursive ? "再帰" : "直下";
-            var elapsed = item.QueryStart is long start ? $"照会中 {(Environment.TickCount64 - start) / 1000.0:0.0}秒" : item.QueryMs is { } ms ? $"{ms / 1000.0:0.###}秒" : "—";
+            var elapsed = item.QueryStart is not null ? "照会中" : item.QueryMs is { } ms ? $"{ms / 1000.0:0.###}秒" : "—";
             return new Row(item.Id.ToString(), item, Label(item),
                  $"{Age(item.LatestFileWriteAt)}  ｜  {scope}  ｜  {state}  ｜  {elapsed}{(item.Error is null ? "" : "：" + item.Error)}",
                 item.LatestFileWriteAt, count, item.Path, Folder: item.IsFolder, Root: true);
@@ -120,6 +121,7 @@ internal sealed partial class DesktopWindow
 
     private void RefreshHistory()
     {
+        __historyDirty = false;
         var filter = __filter.Text?.Trim() ?? "";
         var rows = __state.History
             .Where(x => filter.Length == 0 || x.Path.Contains(filter, StringComparison.OrdinalIgnoreCase) || x.Kind.Contains(filter, StringComparison.OrdinalIgnoreCase))
@@ -129,6 +131,7 @@ internal sealed partial class DesktopWindow
 
     private void RefreshInbox()
     {
+        __inboxDirty = false;
         var roots = __state.Items.Where(x => x.Unread > 0)
             .Select(x => new Row(x.Id.ToString(), x, Label(x), $"{x.Unread:N0} 件  ｜  {Age(x.LastChanged)}",
                 x.LastChanged, x.Unread, x.Path, Folder: x.IsFolder, Root: true));
@@ -136,20 +139,41 @@ internal sealed partial class DesktopWindow
         foreach (var root in Order(roots, __inboxSort, __inboxReverse))
         {
             var target = root.Target!;
-            bool branches = target.IsFolder && target.PendingFiles.Keys.Any(key => key != ".");
+            bool branches = target.IsFolder && target.PendingFiles.Count > (target.PendingFiles.ContainsKey(".") ? 1 : 0);
             bool open = __expanded.Contains(root.Key);
             rows.Add(root with { Branch = branches ? root.Key : null, Expanded = open });
             if (!branches || !open) continue;
             var children = target.PendingFiles.Values.Where(c => c.Relative != ".");
-            AddChildren(rows, target, root.Key, "", 1, children);
+            AppendExpandedRows(rows, target, root.Key, children);
         }
         Assign(__inbox, rows);
     }
 
-    private void AddChildren(List<Row> rows, WatchItem target, string root, string prefix, int depth, IEnumerable<FileChange> changes)
+    // 展開中の枝だけを深さ優先で投影する。長い階層でも呼び出しスタックを使わない。
+    private void AppendExpandedRows(List<Row> rows, WatchItem target, string root, IEnumerable<FileChange> changes)
+    {
+        var queue = new Stack<InboxChild>();
+        PushSiblings(queue, BuildChildren(target, root, "", 1, changes));
+        while (queue.TryPop(out var child))
+        {
+            rows.Add(child.Row);
+            if (child.Row.Expanded && child.Changes is { } nested)
+                PushSiblings(queue, BuildChildren(target, root, child.Prefix, child.Row.Depth + 1, nested));
+        }
+    }
+
+    private void PushSiblings(Stack<InboxChild> queue, List<InboxChild> children)
+    {
+        foreach (var child in Order(children, static c => c.Row, __inboxSort, __inboxReverse).Reverse())
+            queue.Push(child);
+    }
+
+    private sealed record InboxChild(Row Row, string Prefix = "", List<FileChange>? Changes = null);
+
+    private List<InboxChild> BuildChildren(WatchItem target, string root, string prefix, int depth, IEnumerable<FileChange> changes)
     {
         var groups = new Dictionary<string, List<FileChange>>(StringComparer.OrdinalIgnoreCase);
-        var siblings = new List<Row>();
+        var siblings = new List<InboxChild>();
         foreach (var change in changes)
         {
             var rest = change.Relative.AsSpan(prefix.Length);
@@ -157,36 +181,39 @@ internal sealed partial class DesktopWindow
             if (slash < 0)
             {
                 string path = Path.Combine(target.Path, change.Relative);
-                siblings.Add(new(root + "|" + change.Relative, target, rest.ToString(), $"{change.Kind}  ｜  {Age(change.DetectedAt)}",
-                    change.DetectedAt, change.Count, path, change, Depth: depth));
+                var row = new Row(root + "|" + change.Relative, target, rest.ToString(), $"{change.Kind}  ｜  {Age(change.DetectedAt)}",
+                    change.DetectedAt, change.Count, path, change, Depth: depth);
+                siblings.Add(new(row));
                 continue;
             }
             string name = rest[..slash].ToString();
             if (!groups.TryGetValue(name, out var group)) groups[name] = group = [];
             group.Add(change);
         }
+
         foreach (var (name, group) in groups)
         {
             var relative = prefix + name;
-            var branch = root + "|" + relative + "\\";
+            var next = relative + "\\";
+            var branch = root + "|" + next;
             var time = group.Max(x => x.DetectedAt);
-            siblings.Add(new(branch, target, name, $"{group.Count:N0} ファイル  ｜  {Age(time)}", time,
+            var row = new Row(branch, target, name, $"{group.Count:N0} ファイル  ｜  {Age(time)}", time,
                 group.Count, Path.Combine(target.Path, relative), Folder: true, Depth: depth, Branch: branch,
-                Expanded: __expanded.Contains(branch)));
+                Expanded: __expanded.Contains(branch));
+            siblings.Add(new(row, next, group));
         }
-        foreach (var row in Order(siblings, __inboxSort, __inboxReverse))
-        {
-            rows.Add(row);
-            if (row.Expanded) AddChildren(rows, target, root, prefix + row.Name + "\\", depth + 1, groups[row.Name]);
-        }
+        return siblings;
     }
 
-    private static IEnumerable<Row> Order(IEnumerable<Row> rows, int column, bool reverse) => column switch
+    private static IEnumerable<Row> Order(IEnumerable<Row> rows, int column, bool reverse) =>
+        Order(rows, static row => row, column, reverse);
+
+    private static IEnumerable<T> Order<T>(IEnumerable<T> rows, Func<T, Row> select, int column, bool reverse) => column switch
     {
-        1 => reverse ? rows.OrderByDescending(x => x.At) : rows.OrderBy(x => x.At),
-        2 => reverse ? rows.OrderByDescending(x => x.Count) : rows.OrderBy(x => x.Count),
-        _ => reverse ? rows.OrderByDescending(x => x.Name, StringComparer.CurrentCultureIgnoreCase)
-            : rows.OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase)
+        1 => reverse ? rows.OrderByDescending(x => select(x).At) : rows.OrderBy(x => select(x).At),
+        2 => reverse ? rows.OrderByDescending(x => select(x).Count) : rows.OrderBy(x => select(x).Count),
+        _ => reverse ? rows.OrderByDescending(x => select(x).Name, StringComparer.CurrentCultureIgnoreCase)
+            : rows.OrderBy(x => select(x).Name, StringComparer.CurrentCultureIgnoreCase)
     };
 
     private static void Assign(ListBox list, IEnumerable<Row> rows)
