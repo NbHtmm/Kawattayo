@@ -38,6 +38,20 @@ Windowsから実行する。UTには.NET 10 SDKと、初回のNuGet復元また�
 
 SCTは `--smoke` を使用せず、本番と同じEXEに対して、起動引数・終了コード・ファイル・画面など外から見える結果を検証する。`result.json` のケースIDに対応させる。比較種別、上書き拒否、CLIとGUIの保存領域共有、画面操作、実SMB、通知バナーを別シナリオとする。GUI操作を拡張するなら FlaUI/UIA3 と固定の `AutomationId` を使い、座標クリックや固定時間待ちは避ける。実SMBと通知バナーはこの初期版の対象外。
 
+
+### 専用環境のSCT
+
+`run_sct.bat` が実行するのは台帳の「自動」だけ。「要環境」は専用端末で個別実行し、自動結果とは別の `environment-result.json` に残す。ファイルの作成、更新、試験アプリの起動は原則として使い捨てのフィクスチャに限る。実SMBを試すなら、本番共有ではなく明示指定した試験専用のUNCを使う。
+
+| 確認範囲 | 補助スクリプト | 実施に必要なもの |
+|---|---|---|
+| SMBの切断・書き込み競合・パスと権限 | `Run-SmbReconnect.ps1`, `Run-SmbLifecycle.ps1`, `Run-SmbPathChecks.ps1` | 専用共有と権限、切断・書き込み試験では別クライアント |
+| Windows通知のクリック・安定待ち | `Run-NotificationActivation.ps1`, `Run-NotificationTiming.ps1` | 通知を利用できる対話セッションと、実バナーの操作・記録 |
+| 異なる倍率、照会負荷 | `Run-DpiSession.ps1`, `Run-PerfSession.ps1` | 4Kと異なる倍率の画面、または照会中の応答を測れる専用端末 |
+| エクスプローラー操作、関連付け | `Run-ExplorerDrop.ps1`, `Run-DownloadAndOpen.ps1` | 実際のドラッグ操作、または試験用ビューアーを関連付けた使い捨てユーザー |
+
+詳しくは [専用環境の実行手順](SCT/ENVIRONMENT.md)。`PREPARED_ONLY`、`INSPECTED_ONLY`、`REHEARSAL_PASS`、`BLOCKED` は合格件数に加えない。準備や予行で通っても、その環境での動作は未確認のまま。
+
 ## ツールの選定
 
 - 採用：[xUnit v3](https://xunit.net/docs/getting-started/v3/cmdline) と [.NET CLI/VSTest](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-vstest) でテストとTRX、[Coverlet](https://github.com/coverlet-coverage/coverlet) でカバレッジ。初期版はパッケージバージョンとロックを固定する。
