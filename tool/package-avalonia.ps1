@@ -1,4 +1,4 @@
-﻿# Windows x64 用の Native AOT 配布 ZIP。利用者データや PDB は入れない。
+# Windows x64 用の Native AOT 配布 ZIP。利用者データや PDB は入れない。
 param(
     [string]$PublishDirectory,
     [string]$AssetsFile,
@@ -38,6 +38,8 @@ try {
         'av_libglesv2.dll' = Join-Path $PublishDirectory 'av_libglesv2.dll'
         'libHarfBuzzSharp.dll' = Join-Path $PublishDirectory 'libHarfBuzzSharp.dll'
         'libSkiaSharp.dll' = Join-Path $PublishDirectory 'libSkiaSharp.dll'
+        'ランチャー連携.md' = Join-Path $root 'avalonia/Launcher.md'
+        'icons/collector.ico' = Join-Path $root 'src/Assets/collector.ico'
         '使い方.md' = Join-Path $root 'avalonia/README.md'
         'LICENSE.txt' = Join-Path $root 'LICENSE'
         'licenses/Avalonia-LICENSE.txt' = Join-Path $root 'avalonia/Avalonia-LICENSE.txt'

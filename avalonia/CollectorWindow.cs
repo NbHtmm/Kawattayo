@@ -23,6 +23,8 @@ internal sealed class CollectorWindow : Window
     {
         this.checkpoints = checkpoints;
         Title = "かわったよ · 差分収集";
+        using (var icon = GetType().Assembly.GetManifestResourceStream("collector.ico"))
+            if (icon is not null) Icon = new WindowIcon(icon);
         Width = 820; Height = 630; MinWidth = 480; MinHeight = 460;
         create = Command("チェックポイントを作成", Create);
         compare = Command("比較", Compare);

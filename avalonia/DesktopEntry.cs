@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
+using Avalonia.Threading;
 
 namespace ShareFileWatch;
 
@@ -26,7 +27,8 @@ internal static class DesktopEntry
         catch (AbandonedMutexException) { owner = true; }
         if (!owner)
         {
-            WinDesktop.Message("かわったよはすでに起動しています。通知領域から終了してから開いてください。");
+            if (WindowActivation.Send(WindowActivation.FromArguments(args))) return 0;
+            WinDesktop.Message("起動済みのかわったよに接続できませんでした。通知領域から画面を開いてください。");
             return 1;
         }
         try
@@ -66,7 +68,25 @@ internal sealed class DesktopApp : Application
             }
             else
 #endif
-            desktop.MainWindow = new DesktopWindow(new MonitorSession(StateStore.BesideExecutable(AppContext.BaseDirectory)));
+                        {
+                var window = new DesktopWindow(new MonitorSession(StateStore.BesideExecutable(AppContext.BaseDirectory)));
+                desktop.MainWindow = window;
+                var request = WindowActivation.FromArguments(desktop.Args ?? []);
+                window.ShowActivated = request != WindowRequest.Collector;
+                var stop = new CancellationTokenSource();
+                _ = WindowActivation.Listen(kind => Dispatcher.UIThread.Post(() => window.ActivateWindow(kind)), stop.Token);
+                desktop.Exit += (_, _) => { stop.Cancel(); stop.Dispose(); };
+                window.Opened += (_, _) =>
+                {
+                    if (request != WindowRequest.Collector) return;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        window.ShowActivated = true;
+                        window.ActivateWindow(request);
+                        window.Hide();
+                    });
+                };
+            }
         }
         base.OnFrameworkInitializationCompleted();
     }

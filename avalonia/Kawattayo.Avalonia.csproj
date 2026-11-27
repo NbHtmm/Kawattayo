@@ -28,6 +28,7 @@
     <RuntimeHostConfigurationOption Include="System.Globalization.UseNls" Value="true" Condition="'$(KawattayoUseNls)' == 'true'" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
     <Compile Include="../src/Checkpoints.cs;../src/LocalDownloads.cs;../src/AppDefaults.cs;../src/FileProbe.cs;../src/FolderProbe.cs;../src/FileExclusions.cs;../src/State.cs;../src/StateStore.cs;../src/InventoryDb*.cs;../src/SettingsJsonContext.cs;../src/WindowsShell.cs" LinkBase="Shared" />
+    <EmbeddedResource Include="../src/Assets/collector.ico" LogicalName="collector.ico" />
     <EmbeddedResource Include="../src/Assets/folder-bell.ico" LogicalName="folder-bell.ico" />
   </ItemGroup>
   <!-- Copy only runtime files; keep existing settings and SQLite data in bin. -->

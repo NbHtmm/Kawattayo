@@ -4,6 +4,13 @@ internal sealed partial class DesktopWindow
 {
     private CollectorWindow? collector;
 
+    internal void ActivateWindow(WindowRequest request)
+    {
+        if (__closing) return;
+        if (request == WindowRequest.Collector) ShowCollector();
+        else ShowFromTray();
+    }
+
     internal void ShowCollector()
     {
         if (__closing) return;
