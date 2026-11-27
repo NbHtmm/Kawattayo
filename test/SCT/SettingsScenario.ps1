@@ -157,3 +157,49 @@ function Test-SctDatabaseSaveFailure($Process,$View,[string]$Database) {
         Wait-SctRemainingUnread $Process
     } finally { $lock.Dispose() }
 }
+
+# Reject a supported JSON shape that the application cannot safely interpret.
+function Invoke-SctSettingsSchemaRejection([string]$Package,[string]$Work) {
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+    [void][IO.Directory]::CreateDirectory($Work)
+    $default = '{"Version":1,"KeepInTray":false,"Items":[]}'
+    foreach ($kind in 'future-version','duplicate-id') {
+        $app = Join-Path $Work $kind
+        [IO.Compression.ZipFile]::ExtractToDirectory($Package,$app)
+        $settings = Join-Path $app 'settings.json'
+        $backup = $settings + '.bak'
+        if ($kind -eq 'future-version') {
+            $invalid = '{"Version":2,"KeepInTray":false,"Items":[]}'
+            [IO.File]::WriteAllText($backup,$default)
+            $message = 'この設定ファイルのバージョンには対応していません。'
+        } else {
+            $id = [guid]::NewGuid().ToString()
+            # The JSON is valid and paths differ; the registration identifier is the only conflict.
+            $invalid = @{Version=1;KeepInTray=$false;Items=@(
+                @{Id=$id;Path=(Join-Path $Work 'one.txt');IsFolder=$false},
+                @{Id=$id;Path=(Join-Path $Work 'two.txt');IsFolder=$false}
+            )} | ConvertTo-Json -Depth 4
+            $message = '設定とバックアップを読み込めません。'
+        }
+        [IO.File]::WriteAllText($settings,$invalid)
+        $p = Start-SctUnreadApp (Join-Path $app 'かわったよ.exe')
+        try {
+            $dialog = Wait-SctUi "$kind reports a native diagnostic" {
+                if ($p.HasExited) { throw "Fixture exited without diagnostic: $($p.ExitCode)." }
+                $w = Get-SctOwnedWindow $p.Id 'かわったよ'
+                if ($w -and (Get-SctUiLabel $w $message -Prefix)) { $w }
+            }
+            Confirm-SctNativeSettingsDialog $dialog $p.Id
+            if (!$p.WaitForExit(10000) -or $p.ExitCode -ne 1) { throw 'Expected refused GUI startup.' }
+            if ([IO.File]::ReadAllText($settings) -cne $invalid) { throw 'The supplied settings bytes were modified.' }
+            if ($kind -eq 'future-version') {
+                if ([IO.File]::ReadAllText($backup) -cne $default) { throw 'The older backup was modified.' }
+            } elseif ([IO.File]::Exists($backup)) { throw 'Duplicate registration wrote an unexpected backup.' }
+            if (@(Get-ChildItem -LiteralPath $app -Filter 'settings.json.broken-*').Count -ne 0) {
+                throw 'Validation unexpectedly renamed the original settings.'
+            }
+        } finally { Stop-SctPreferenceFixture $p }
+    }
+    [IO.File]::WriteAllText((Join-Path $Work 'observations.txt'),
+        'PASS: future-version settings and valid legacy backup retained byte-for-byte; duplicate ID refused and original settings retained without creating backup.')
+}
