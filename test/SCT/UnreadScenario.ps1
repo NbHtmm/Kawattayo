@@ -134,7 +134,7 @@ function Get-SctUiLabel($Window, [string]$Name, [switch]$Prefix) {
     $scope = [Windows.Automation.TreeScope]::Descendants
     if (!$Prefix) { return $Window.FindFirst($scope, [Windows.Automation.PropertyCondition]::new($property, $Name)) }
     return $Window.FindAll($scope, [Windows.Automation.Condition]::TrueCondition) |
-        Where-Object { $_.Current.Name.StartsWith($Name, [StringComparison]::Ordinal) } | Select-Object -First 1
+        Where-Object { ([string]$_.Current.Name).StartsWith($Name, [StringComparison]::Ordinal) } | Select-Object -First 1
 }
 
 function Invoke-SctUiButton($Window, [string]$Name) {
