@@ -78,7 +78,7 @@ internal static class Program
         };
     }
 
-    private static string Describe(CheckpointDifference change)
+    internal static string Describe(CheckpointDifference change)
     {
         var kind = change.Kind switch
         {
@@ -89,7 +89,7 @@ internal static class Program
             (change.Error is null ? "" : " ｜ " + change.Error);
     }
 
-    private static void Changes(Utf8JsonWriter writer, IEnumerable<CheckpointDifference> changes)
+    internal static void Changes(Utf8JsonWriter writer, IEnumerable<CheckpointDifference> changes)
     {
         writer.WriteStartArray();
         foreach (var change in changes)
@@ -103,7 +103,7 @@ internal static class Program
         writer.WriteEndArray();
     }
 
-    private static void Copies(Utf8JsonWriter writer, DownloadResult[] copies, CheckpointDifference[] unknown)
+    internal static void Copies(Utf8JsonWriter writer, DownloadResult[] copies, CheckpointDifference[] unknown)
     {
         writer.WriteStartObject();
         writer.WriteStartArray("files");
