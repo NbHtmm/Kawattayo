@@ -46,3 +46,7 @@
 `pwsh -File test/SCT/Run-DpiSession.ps1 -Package "<配布ZIP>" -InspectOnly` で画面数と解像度のみ確認できる。アプリの起動・画面キャプチャ・設定変更は行わない。実試験は4Kと倍率の異なるもう1台を接続した使い捨てセッションで、`-InspectOnly` を `-DedicatedSession` に替える。
 
 案内に従い、試験用ウィンドウだけを指定の画面へ移動・縮小し、実際のポインターで長いファイル名の行を展開する。スクリプトがファイルの到達性、実際の画面ID・解像度、ウィンドウのDPIを確認する。ボタンやスクロールのヒット位置は利用者の確認が必要。証跡は `build/DPI-001-*/environment-result.json` と手動の検証画像。画面が1台、4Kなし、またはDPIが同じなら合格にしない。
+
+## SCT-GUI-015 のエクスプローラー操作
+
+使い捨ての対話セッションで `pwsh -File test/SCT/Run-ExplorerDrop.ps1 -Package "<配布ZIP>" -DedicatedSession`。案内に出る試験用フォルダをエクスプローラーで開き、指定のファイルとフォルダを実際にドラッグ＆ドロップする。同じ操作をもう一度行う。スクリプトは設定画面、登録件数、設定ファイルのID・絶対パス・種類、実ファイルの内容を1回目と2回目で照合する。通常の対象やクリップボードは使わない。記録は `build/EXPLORER-GUI-015-*/environment-result.json`。`-PrepareOnly` の場合、配布物を展開するが実際の操作は行わない。
