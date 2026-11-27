@@ -24,7 +24,7 @@ Roslynで手書きの関数を署名単位で抽出し、`UT coverage map` に�
 
 ## SCTを追加する
 
-[SCT試験仕様](SCT/SPEC.md) をケース一覧とする。Reqnrollで自動化したケースの目的・前提・操作・期待結果は `SCT/Features/*.feature` に書き、仕様を二重管理しない。ケースIDをシナリオタグに付けて `SCT/Steps/` のC#に接続する。BAT実行後は `result.json` と、手順結果の `cucumber.ndjson`、`sct.trx` を読む。手動ケースは別に実施記録を残す。
+[SCT試験仕様](SCT/SPEC.md) をケース一覧とする。Reqnrollで自動化したケースの目的・前提・操作・期待結果は `SCT/Features/*.feature` に書き、仕様を二重管理しない。ケースIDをシナリオタグに付けて `SCT/Steps/` のC#に接続する。BAT実行後は `result.json` と、手順結果の `cucumber.ndjson`、`sct.trx` を読む。手動ケースは別に実施記録を残す。 UT・SCTともテスト0件は失敗。Reqnrollケースは毎回新しい出力先に、対象IDの完了記録と全手順の合格・対応コードがそろった場合だけ合格とする。SCTのBATはドライランに切り替えない。
 
 SCTは `--smoke` を使用せず、本番と同じEXEに対して、起動引数・終了コード・ファイル・画面など外から見える結果を検証する。`result.json` のケースIDに対応させる。比較種別、上書き拒否、CLIとGUIの保存領域共有、画面操作、実SMB、通知バナーを別シナリオとする。GUI操作を拡張するなら FlaUI/UIA3 と固定の `AutomationId` を使い、座標クリックや固定時間待ちは避ける。実SMBと通知バナーはこの初期版の対象外。
 

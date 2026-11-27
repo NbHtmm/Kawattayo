@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿. (Join-Path $PSScriptRoot 'Evidence.ps1')
+
+$ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $out = Join-Path $repo ('build/SCT-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($out)
@@ -42,7 +44,7 @@ function Invoke-CheckpointScenario {
     & dotnet restore $project --locked-mode
     if ($LASTEXITCODE -ne 0) { throw 'SCT package restore failed.' }
 
-    & dotnet test $project --no-restore -p:ReqnrollGenerationTaskFactory=AssemblyTaskFactory --filter 'Category=SCT-CLI-001' --results-directory $out --logger 'trx;LogFileName=sct.trx'
+    & dotnet test $project --no-restore -p:ReqnrollGenerationTaskFactory=AssemblyTaskFactory --filter 'Category=SCT-CLI-001' --settings (Join-Path $PSScriptRoot 'strict.runsettings') --results-directory $out --logger 'trx;LogFileName=sct.trx'
     $exitCode = $LASTEXITCODE
     $trxPath = Join-Path $out 'sct.trx'
     if (![IO.File]::Exists($trxPath) -or ![IO.File]::Exists($messagesPath)) {
@@ -53,6 +55,7 @@ function Invoke-CheckpointScenario {
     if ($exitCode -ne 0 -or $rows.Count -ne 1 -or $rows[0].outcome -ne 'Passed') {
         throw 'The checkpoint scenario did not pass. See sct.trx and cucumber.ndjson.'
     }
+    Assert-SctScenarioEvidence -Path $messagesPath -CaseId 'SCT-CLI-001'
 }
 
 try {

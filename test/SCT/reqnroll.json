@@ -1,4 +1,5 @@
 {
+  "runtime": { "missingOrPendingStepsOutcome": "Error" },
   "formatters": {
     "message": { "outputFilePath": "cucumber.ndjson" }
   }
