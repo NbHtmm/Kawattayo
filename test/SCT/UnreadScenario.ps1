@@ -1,5 +1,5 @@
 ﻿# Test the packaged GUI through Windows UI Automation. Only the fixture's settings are seeded.
-function Invoke-SctUnreadScenario([string]$Package, [string]$Work, [switch]$DatabaseOutage) {
+function Invoke-SctUnreadScenario([string]$Package, [string]$Work, [switch]$DatabaseOutage, [switch]$BulkDownload) {
     Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
     [void][IO.Directory]::CreateDirectory($Work)
     $app = Join-Path $Work 'app'
@@ -32,7 +32,10 @@ function Invoke-SctUnreadScenario([string]$Package, [string]$Work, [switch]$Data
         }
         [IO.File]::AppendAllText($evidence, "PASS baseline: unread=0
 ")
-        foreach ($path in $paths) { [IO.File]::WriteAllText($path, 'SCT fixture') }
+        foreach ($path in $paths) {
+            $content = if ($BulkDownload) { 'Contents specific to ' + [IO.Path]::GetFileName($path) } else { 'SCT fixture' }
+            [IO.File]::WriteAllText($path, $content)
+        }
         Invoke-SctUiButton $view '↻ 更新'
         $view = Wait-SctUi 'two distinct unread updates' {
             $main = Get-SctMonitorWindow $p
@@ -49,6 +52,10 @@ function Invoke-SctUnreadScenario([string]$Package, [string]$Work, [switch]$Data
         }
         [IO.File]::AppendAllText($evidence, "PASS unread=2; initially collapsed; both files visible after expand
 ")
+        if ($BulkDownload) {
+            Test-SctBulkDownload $p $view $Work $paths $evidence
+            return
+        }
         Invoke-SctUiButton $view 'SCT-Alpha を既読にする'
         Wait-SctRemainingUnread $p
         foreach ($path in $paths) {

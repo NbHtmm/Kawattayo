@@ -3,6 +3,7 @@
 . (Join-Path $PSScriptRoot 'UnreadScenario.ps1')
 . (Join-Path $PSScriptRoot 'MonitorLifecycle.ps1')
 . (Join-Path $PSScriptRoot 'SettingsScenario.ps1')
+. (Join-Path $PSScriptRoot 'BulkDownload.ps1')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -96,7 +97,7 @@ try {
         $desktopReady = $true
     } catch {
         $message = $_.Exception.Message
-        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-011','SCT-GUI-013','SCT-PERSIST-001','SCT-PERSIST-002') {
+        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-006','SCT-GUI-011','SCT-GUI-013','SCT-PERSIST-001','SCT-PERSIST-002') {
             $results.Add(@{ id = $id; outcome = 'BLOCKED'; error = $message })
             Write-Host "BLOCKED ${id}: $message"
         }
@@ -126,6 +127,7 @@ try {
         Invoke-Case 'SCT-GUI-002' { Invoke-SctUnreadScenario -Package $package -Work (Join-Path $out 'unread') }
         Invoke-Case 'SCT-GUI-004' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-004') 'FileLifecycle' }
         Invoke-Case 'SCT-GUI-005' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-005') 'FolderOffline' }
+        Invoke-Case 'SCT-GUI-006' { Invoke-SctUnreadScenario -Package $package -Work (Join-Path $out 'SCT-GUI-006') -BulkDownload }
         Invoke-Case 'SCT-GUI-011' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-011') 'Exclusions' }
         Invoke-Case 'SCT-GUI-013' { Invoke-SctExistingInstance $package (Join-Path $out 'SCT-GUI-013') }
         Invoke-Case 'SCT-PERSIST-001' { Invoke-SctSettingsRecovery $package (Join-Path $out 'SCT-PERSIST-001') }
@@ -153,6 +155,11 @@ try {
             if ($result.id -eq 'SCT-GUI-002') {
                 $result.testCode = 'test/SCT/UnreadScenario.ps1'
                 $result.evidence = @('unread/observations.txt', 'unread/ui-on-failure.txt' |
+                    Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
+            }
+            if ($result.id -eq 'SCT-GUI-006') {
+                $result.testCode = 'test/SCT/BulkDownload.ps1'
+                $result.evidence = @('SCT-GUI-006/observations.txt','SCT-GUI-006/ui-on-failure.txt' |
                     Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
             }
             if ($result.id -in 'SCT-GUI-004','SCT-GUI-005','SCT-GUI-011','SCT-GUI-013') {
