@@ -53,6 +53,12 @@ internal sealed class SettingsFile(string file)
     {
         using var stream = File.OpenRead(path);
         var data = JsonSerializer.Deserialize(stream, SettingsJsonContext.Default.AppState) ?? throw new JsonException();
+        return ValidateSettings(data);
+    }
+
+    // DTO の内容とパス文字列だけを検証する。設定ファイルの読み取りや復旧は行わない。
+    internal static AppState ValidateSettings(AppState data)
+    {
         if (data.Version != 1) throw new NotSupportedException("この設定ファイルのバージョンには対応していません。");
         if (data.Items is null || data.Items.Any(i => i is null || i.Id == Guid.Empty || string.IsNullOrWhiteSpace(i.Path)) ||
             data.Items.Select(i => i.Id).Distinct().Count() != data.Items.Count)
