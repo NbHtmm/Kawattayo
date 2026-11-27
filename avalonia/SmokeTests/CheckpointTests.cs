@@ -5,6 +5,7 @@ internal static class CheckpointTests
 {
     internal static void Run(string fixture)
     {
+        VerifyAppOwnedFiles(fixture);
         var workspace = Directory.CreateDirectory(Path.Combine(fixture, "checkpoint-" + Guid.NewGuid().ToString("N"))).FullName;
         var source = Directory.CreateDirectory(Path.Combine(workspace, "source")).FullName;
         var output = Directory.CreateDirectory(Path.Combine(workspace, "output")).FullName;
@@ -32,6 +33,24 @@ internal static class CheckpointTests
         var offline = new WindowsAppPaths(workspace).CreateCheckpoints().Compare(point.Id, default).Changes;
         Require(offline.Length == 1 && offline[0].Kind == DifferenceKind.Unconfirmed, "ルート消失を各ファイルの削除にしない");
     }
+    private static void VerifyAppOwnedFiles(string fixture)
+    {
+        var own = Directory.CreateDirectory(Path.Combine(fixture, "collector-own-profile")).FullName;
+        File.WriteAllText(Path.Combine(own, "sample.txt"), "first");
+        var paths = new WindowsAppPaths(own);
+        var service = paths.CreateCheckpoints();
+        var current = service.Create("自フォルダ", own, true, "", default);
+        Require(service.Compare(current.Id, default).Changes.Length == 0, "DBの初回作成は差分にしない");
+
+        using (var db = new InventoryDb(paths.Cache, create: true))
+            db.SaveCheckpoint(current with { Id = "legacy" }, new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["cache.sqlite3"] = new(1, 2, 3),
+                ["sample.txt"] = FileProbe.Read(Path.Combine(own, "sample.txt")).Fingerprint!
+            }, default);
+        Require(service.Compare("legacy", default).Changes.Length == 0, "旧基準に残る内部DBも差分にしない");
+    }
+
     private static void Require(bool condition, string test)
     {
         if (!condition) throw new InvalidOperationException("差分収集テスト: " + test);

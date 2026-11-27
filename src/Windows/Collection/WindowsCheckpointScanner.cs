@@ -2,7 +2,7 @@ using System.ComponentModel;
 
 namespace ShareFileWatch;
 
-internal sealed class WindowsCheckpointScanner : ICheckpointScanner
+internal sealed class WindowsCheckpointScanner(Func<string, bool> isInternalFile) : ICheckpointScanner
 {
     private const int EntryLimit = 50_000;
 
@@ -30,7 +30,8 @@ internal sealed class WindowsCheckpointScanner : ICheckpointScanner
                     {
                         if (scope.Recursive) pending.Push(name);
                     }
-                    else if (!FileExclusions.Matches(name, scope.Exclusions)) files[name] = entry.Fingerprint;
+                    else if (!FileExclusions.Matches(name, scope.Exclusions) && !isInternalFile(Path.Combine(scope.Root, name)))
+                        files[name] = entry.Fingerprint;
                 }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception)

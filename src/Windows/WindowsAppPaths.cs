@@ -6,6 +6,11 @@ internal sealed record WindowsAppPaths(string Directory)
     internal string Settings => Path.Combine(Directory, AppDefaults.SettingsFileName);
     internal string Cache => Path.Combine(Directory, "cache.sqlite3");
 
-    internal Checkpoints CreateCheckpoints() =>
-        new(new SqliteCheckpointRepository(Cache), new WindowsCheckpointScanner(), new LocalDownloads(), TimeProvider.System);
+    internal Checkpoints CreateCheckpoints()
+    {
+        // 監視と差分収集で、比較DBや設定を「利用者の更新」として数えない条件を共有する。
+        var owned = new AppOwnedFiles(Settings, Cache);
+        return new(new SqliteCheckpointRepository(Cache, owned.Contains), new WindowsCheckpointScanner(owned.Contains),
+            new LocalDownloads(), TimeProvider.System);
+    }
 }
