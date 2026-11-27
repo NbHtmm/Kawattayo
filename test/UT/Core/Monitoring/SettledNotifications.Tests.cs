@@ -113,4 +113,46 @@ public sealed class SettledNotificationsTests
         Assert.True(pending.HasPending(other));
         Assert.Equal(1, pending.Count);
     }
+
+    [Fact]
+    public void Observe_FilesWithDifferentChangeTimesSettleIndependently()
+    {
+        var pending = new SettledNotifications();
+        var id = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var alerts = new List<string>();
+        var versions = new Dictionary<string, Fingerprint>
+        {
+            ["first.txt"] = new(10, 1, 5),
+            ["second.txt"] = new(10, 1, 7)
+        };
+        pending.Queue(id, "first.txt", "first.txt", "更新");
+        pending.Queue(other, "first.txt", "first.txt", "更新");
+        Observe(0);
+        pending.Queue(id, "second.txt", "second.txt", "更新");
+        Observe(5);
+        Observe(10);
+        Assert.Equal("first.txt", Assert.Single(alerts));
+        Assert.Equal("second.txt", Assert.Single(pending.Paths(id)));
+        Observe(15);
+        Assert.Equal(new[] { "first.txt", "second.txt" }, alerts);
+        Assert.False(pending.HasPending(id));
+        Assert.True(pending.HasPending(other));
+
+        void Observe(long now) => pending.Observe(id, true, now, 10,
+            key => versions.GetValueOrDefault(key), _ => true, (path, _) => alerts.Add(path));
+    }
+
+    [Fact]
+    public void Observe_MissingRegistrationDoesNotCallAnyObservers()
+    {
+        var pending = new SettledNotifications();
+        pending.Queue(Guid.NewGuid(), "report.txt", "report.txt", "更新");
+        pending.Observe(Guid.NewGuid(), true, 10, 0,
+            _ => throw new InvalidOperationException("Unexpected fingerprint."),
+            _ => throw new InvalidOperationException("Unexpected unread lookup."),
+            (_, _) => throw new InvalidOperationException("Unexpected alert."));
+        Assert.Equal(1, pending.Count);
+    }
+
 }

@@ -42,4 +42,43 @@ public sealed class SettingsJsonContextTests
         Assert.Equal(0, target.Unread);
         Assert.Null(target.Inventory);
     }
+
+    [Fact]
+    public void AppState_RoundTripKeepsNotificationPolicyAndNullableOverrides()
+    {
+        var original = new AppState
+        {
+            WaitForStable = true, StableSeconds = 23, Paused = true,
+            ExcludedFilePatterns = ["*.tmp", "~$*"],
+            Items =
+            [
+                new() { Path = @"C:\fixture\inherit", IsFolder = true, WaitForStableOverride = null },
+                new() { Path = @"C:\fixture\off", IsFolder = true, WaitForStableOverride = false },
+                new() { Path = @"C:\fixture\on", IsFolder = true, WaitForStableOverride = true }
+            ]
+        };
+        var json = JsonSerializer.Serialize(original, SettingsJsonContext.Default.AppState);
+        var restored = Assert.IsType<AppState>(JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppState));
+        Assert.True(restored.WaitForStable);
+        Assert.Equal(23, restored.StableSeconds);
+        Assert.True(restored.Paused);
+        Assert.Equal(new[] { "*.tmp", "~$*" }, restored.ExcludedFilePatterns);
+        Assert.Equal(new bool?[] { null, false, true }, restored.Items.Select(item => item.WaitForStableOverride));
+    }
+
+    [Fact]
+    public void AppState_LegacyMissingOverridesRetainInheritanceAndDefaultInterval()
+    {
+        const string json = """
+            {"Version":1,"Items":[{"Id":"a8b69faa-0000-4000-8000-000000000001",
+                                  "Path":"C:\\fixture\\folder","IsFolder":true}]}
+            """;
+        var restored = Assert.IsType<AppState>(JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppState));
+        Assert.Equal(60, restored.PollSeconds);
+        Assert.False(restored.Paused);
+        var item = Assert.Single(restored.Items);
+        Assert.Null(item.WaitForStableOverride);
+        Assert.Null(item.RecursiveOverride);
+    }
+
 }
