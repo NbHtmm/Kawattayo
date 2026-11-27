@@ -128,7 +128,7 @@ internal static class Program
         stdout.WriteByte((byte)'\n');
     }
 
-    private sealed class Options
+    internal sealed class Options
     {
         private readonly Dictionary<string, List<string>> values = new(StringComparer.Ordinal);
         internal bool Has(string key) => values.ContainsKey(key);

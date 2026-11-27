@@ -10,5 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../src/Windows/Kawattayo.Windows.csproj" />
+    <InternalsVisibleTo Include="Kawattayo.Core.Tests" />
   </ItemGroup>
 </Project>
