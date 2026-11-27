@@ -101,6 +101,7 @@ internal sealed partial class DesktopWindow
                 CheckpointTests.Run(fixture);
                 await ReconciliationTests.Run(fixture);
                 await ReconciliationTests.VerifyBatchRegistration(fixture);
+                await ReconciliationTests.VerifyJournalOverflow(fixture);
                 await ReconciliationTests.VerifySettled(fixture);
                 UnreadDownloadTests.TestDownloads(Path.Combine(fixture, "unread-downloads"));
                 FileProbeScenarios.Run(fixture);
@@ -108,7 +109,7 @@ internal sealed partial class DesktopWindow
                 ShowCollector();
                 if (collector?.IsVisible != true || !IsVisible) throw new InvalidOperationException("Independent collector did not open.");
                 collector.Close();
-                File.WriteAllText(report, "PASS: checkpoint, collector, notification routing, update hook, Windows file metadata, batch registration, Avalonia window, scan, stale result suppression, save retry, large unread lookup and SQLite restart.");
+                File.WriteAllText(report, "PASS: checkpoint, collector, notification routing, update hook, Windows file metadata, batch registration, change journal overflow, Avalonia window, scan, stale result suppression, save retry, large unread lookup and SQLite restart.");
             }
             catch (Exception error) { File.WriteAllText(report, error.ToString()); }
             finally { __closed = true; CloseChildWindows(); Close(); }

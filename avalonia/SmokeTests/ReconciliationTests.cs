@@ -80,6 +80,41 @@ internal static class ReconciliationTests
     }
 
 
+    internal static async Task VerifyJournalOverflow(string fixture)
+    {
+        var profile = Directory.CreateDirectory(Path.Combine(fixture, "overflow-profile")).FullName;
+        var root = Directory.CreateDirectory(Path.Combine(fixture, "overflow-input")).FullName;
+        var changed = Path.Combine(root, "changed.txt");
+        File.WriteAllText(changed, "before");
+        var session = new MonitorSession(StateStore.BesideExecutable(profile), new ManualTimer(), new ManualTimer(), new StepClock());
+        var fullScans = new List<bool>();
+        session.UseSyntheticFeedForTest = true;
+        session.ScanModeForTest = fullScans.Add;
+        session.State.LowServerLoad = true;
+        session.State.WaitForStable = false;
+        try
+        {
+            await session.Register([root]);
+            await session.Scan(automatic: true);
+            var item = session.State.Items.Single();
+            Require(item.Unread == 0 && fullScans.SequenceEqual(new[] { true }), "Initial scan only captures baseline");
+
+            File.AppendAllText(changed, " after initial scan");
+            session.FeedEventForTest(changed);
+            // Only the first signal represents a real change. The synthetic burst forces its history out.
+            for (int index = 0; index < 4_100; ++index)
+                session.FeedEventForTest(Path.Combine(root, $"unused-{index}.txt"));
+            await session.Scan(automatic: true);
+            Require(fullScans.SequenceEqual(new[] { true, true }), "Journal overflow forces a full scan before the periodic deadline");
+            Require(item.Unread == 1 && item.PendingFiles.Count == 1 && item.PendingFiles.ContainsKey("changed.txt") &&
+                session.State.History.Single().Path == changed, "Full scan recovers the lost signal without spurious files");
+
+            await session.Scan(automatic: true);
+            Require(fullScans.Count == 2 && item.Unread == 1, "A reconciled journal does not replay or re-scan on the next idle poll");
+        }
+        finally { await session.Close(); }
+    }
+
     internal static async Task VerifySettled(string fixture)
     {
         var dir = Directory.CreateDirectory(Path.Combine(fixture, "settled-profile")).FullName;
