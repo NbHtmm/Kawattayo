@@ -220,7 +220,7 @@ internal sealed partial class MonitorSession
         if (baseline is not null && folder?.Files is { } files)
         {
             bool scopeChanged = !FileExclusions.Same(priorExclusions, target.Exclusions);
-            prepared = FolderProbe.Compare(baseline, files, at,
+            prepared = FolderComparison.Compare(baseline, files, at,
                 scopeChanged ? priorExclusions : null, scopeChanged ? target.Exclusions : null);
         }
         return new(target.Id, target.Revision, file, folder, at, prepared);

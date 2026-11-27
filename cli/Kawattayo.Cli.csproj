@@ -9,6 +9,6 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../src/Checkpoints.cs;../src/LocalDownloads.cs;../src/FileProbe.cs;../src/FileExclusions.cs;../src/InventoryDb.cs;../src/InventoryDb.Checkpoints.cs" LinkBase="Shared" />
+    <ProjectReference Include="../src/Windows/Kawattayo.Windows.csproj" />
   </ItemGroup>
 </Project>
