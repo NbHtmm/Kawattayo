@@ -26,16 +26,18 @@ internal static class MonitoringReducer
         {
             changed = true;
             bool isRootFolderEvent = target.IsFolder && Path.GetFileName(path) == ".";
-            if (includeFileUpdates && !isRootFolderEvent && kind is ("追加" or "更新"))
-            {
-                var expected = observed.Folder?.Files?.GetValueOrDefault(Path.GetRelativePath(target.Path, path))
-                    ?? observed.File?.Fingerprint;
-                if (expected is not null) (files ??= []).Add(new(path, expected));
-            }
+            // 表示文言では判定しない。変更コールバックが来て、読み取れる新しいファイルがある場合だけ対象。
+            if (includeFileUpdates && !isRootFolderEvent && PresentFile(observed, target, path) is { } expected)
+                (files ??= []).Add(new(path, expected));
             if (isRootFolderEvent) path = Path.GetDirectoryName(path)!;
             RecordHistory(state, path, kind, observed.At, pending?.Value, seenPaths, alerts);
         }
     }
+
+    private static Fingerprint? PresentFile(WatchObservation observed, WatchItem target, string path) =>
+        target.IsFolder
+            ? observed.Folder?.Files?.GetValueOrDefault(Path.GetRelativePath(target.Path, path))
+            : observed.File is { State: ProbeState.Found } file ? file.Fingerprint : null;
 
     private static void RecordHistory(AppState state, string path, string kind, DateTimeOffset at, PendingPathLookup? pending,
         HashSet<string> seen, List<MonitorAlert> alerts)

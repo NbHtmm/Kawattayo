@@ -29,6 +29,10 @@ internal static class MonitoringCoreTests
             target.Baseline == ProbeState.Found, "別の世代の結果を破棄する");
         var removed = Apply(new(ProbeState.Missing));
         Require(removed.FileUpdates.Count == 0 && state.History.Last().Kind == "消失", "消失ではフックを起動しない");
+        var reappeared = Apply(new(ProbeState.Found, first));
+        Require(reappeared.FileUpdates.Single().Expected == first && state.History.Last().Kind == "出現",
+            "個別ファイルの再出現をフックに渡す");
+        Require(Apply(new(ProbeState.Found, first)).FileUpdates.Count == 0, "同じ状態の再照会では再実行しない");
 
         ObservationOutcome Apply(ProbeResult file) => MonitoringReducer.Apply(state,
             new(target.Id, target.Revision, file, null, time, null), new(StringComparer.OrdinalIgnoreCase), true)!;
