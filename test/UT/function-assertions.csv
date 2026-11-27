@@ -121,3 +121,7 @@ cli/Program.cs,"Program.Options.Options(string[] args, string[] fields, string[]
 "avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.FromArguments(string[] args)","WindowActivationTests","FromArguments_CollectorRequiresTheExactSingleSwitch","1"
 "avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.FromArguments(string[] args)","WindowActivationTests","FromArguments_SendsOrdinaryRequestsToTheMonitor","6"
 "avalonia/Platform/WindowActivation.cs","ShareFileWatch.WindowActivation.FromArguments(string[] args)","WindowActivationTests","FromArguments_MultipleWindowFlagsDoNotActivateTheCollector","1"
+"src/Windows/Monitoring/MonitorSession.Quiet.cs","ShareFileWatch.MonitorSession.ChangeFeed.Signal(string path)","MonitorSessionQuietTests","Signal_IgnoresAppFilesAndCoalescesCaseVariantsWhileKeepingVersions","1"
+"src/Windows/Monitoring/MonitorSession.Quiet.cs","ShareFileWatch.MonitorSession.ChangeFeed.Stamp(bool folder,string path)","MonitorSessionQuietTests","Signal_IgnoresAppFilesAndCoalescesCaseVariantsWhileKeepingVersions","1"
+"src/Windows/Monitoring/MonitorSession.Quiet.cs","ShareFileWatch.MonitorSession.ChangeFeed.Snapshot(long since)","MonitorSessionQuietTests","Snapshot_RequestsFullReconciliationWhenTheSavedCursorIsOlderThanJournal","1"
+"src/Windows/Monitoring/MonitorSession.Quiet.cs","ShareFileWatch.MonitorSession.ChangeFeed.Snapshot(long since)","MonitorSessionQuietTests","Snapshot_AfterConcurrentSignalsShowsEveryDistinctPathAndTheLatestStamp","1"

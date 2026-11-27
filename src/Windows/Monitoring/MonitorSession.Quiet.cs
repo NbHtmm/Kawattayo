@@ -22,7 +22,7 @@ internal sealed partial class MonitorSession
     private sealed record Checkpoint(int Revision, ChangeFeed? Feed, long Stamp, bool Reliable, int Epoch, long? LastFull);
 
     // Callbacks only set dirty markers. Independent registrations in one directory share a handle.
-    private sealed class ChangeFeed(string directory, bool recursive, Func<string,bool> internalFile)
+    internal sealed class ChangeFeed(string directory, bool recursive, Func<string,bool> internalFile)
     {
         public readonly ConcurrentDictionary<string,long> Names = new(StringComparer.OrdinalIgnoreCase);
         private long version;
