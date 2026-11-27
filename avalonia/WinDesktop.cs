@@ -11,13 +11,14 @@ internal sealed class WinDesktop : IDisposable
     private readonly Window window;
     private readonly Action show, scan, quit, collector;
     private readonly Action<string?> openNotification;
+    private readonly Action<WindowRequest> activateWindow;
     private string? notifiedPath;
     private nint handle, icon;
     private uint taskbarCreated;
     private bool active;
     internal bool IsVisible => active;
 
-    internal WinDesktop(Window window, Action show, Action scan, Action quit, Action collector, Action<string?> openNotification)
+    internal WinDesktop(Window window, Action show, Action scan, Action quit, Action collector, Action<string?> openNotification, Action<WindowRequest> activateWindow)
     {
         this.window = window;
         this.show = show;
@@ -25,16 +26,19 @@ internal sealed class WinDesktop : IDisposable
         this.quit = quit;
         this.collector = collector;
         this.openNotification = openNotification;
+        this.activateWindow = activateWindow;
     }
 
     internal void Attach()
     {
+        if (handle != 0) return;
         handle = window.TryGetPlatformHandle()?.Handle ?? 0;
         if (handle == 0) return;
         taskbarCreated = RegisterWindowMessage("TaskbarCreated");
         icon = LoadIcon(GetModuleHandle(null), (nint)32512);
         if (icon == 0) icon = LoadIcon(0, (nint)32512);
         Win32Properties.AddWndProcHookCallback(window, OnMessage);
+        WindowActivation.Register(handle);
     }
 
     internal void SetVisible(bool visible)
@@ -64,6 +68,13 @@ internal sealed class WinDesktop : IDisposable
             SetVisible(true);
             // Explorer再起動で通知領域へ戻せないときは、画面を復帰させる。
             if (!active) Avalonia.Threading.Dispatcher.UIThread.Post(show);
+        }
+        if (WindowActivation.Message != 0 && msg == WindowActivation.Message)
+        {
+            handled = true;
+            if (wParam == (nint)WindowRequest.Monitor || wParam == (nint)WindowRequest.Collector)
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => activateWindow((WindowRequest)(byte)wParam));
+            return 0;
         }
         if (msg != CallbackMessage) return 0;
         handled = true;
@@ -107,6 +118,7 @@ internal sealed class WinDesktop : IDisposable
     public void Dispose()
     {
         SetVisible(false);
+        WindowActivation.Unregister(handle);
         if (handle != 0) Win32Properties.RemoveWndProcHookCallback(window, OnMessage);
         handle = 0;
     }

@@ -41,7 +41,7 @@ internal sealed partial class DesktopWindow : Window
     {
         __monitor = monitor;
         __state = monitor.State;
-        __native = new(this, ShowFromTray, () => _ = __monitor.Scan(), RequestExit, ShowCollector, OpenNotification);
+        __native = new(this, ShowFromTray, () => _ = __monitor.Scan(), RequestExit, ShowCollector, OpenNotification, ActivateWindow);
         Title = AppDefaults.WindowTitle + " · Avalonia";
         Width = 850;
         Height = 560;

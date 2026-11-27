@@ -73,24 +73,22 @@ internal sealed class DesktopApp : Application
             }
             else
 #endif
-                        {
+            {
                 var window = new DesktopWindow(new MonitorSession(StateStore.BesideExecutable(AppContext.BaseDirectory)));
                 desktop.MainWindow = window;
                 var request = WindowActivation.FromArguments(desktop.Args ?? []);
                 window.ShowActivated = request != WindowRequest.Collector;
-                var stop = new CancellationTokenSource();
-                _ = WindowActivation.Listen(kind => Dispatcher.UIThread.Post(() => window.ActivateWindow(kind)), stop.Token);
-                desktop.Exit += (_, _) => { stop.Cancel(); stop.Dispose(); };
-                window.Opened += (_, _) =>
+                if (request == WindowRequest.Collector) window.Opened += OpenCollectorOnce;
+                void OpenCollectorOnce(object? sender, EventArgs args)
                 {
-                    if (request != WindowRequest.Collector) return;
+                    window.Opened -= OpenCollectorOnce;
                     Dispatcher.UIThread.Post(() =>
                     {
                         window.ShowActivated = true;
                         window.ActivateWindow(request);
                         window.Hide();
                     });
-                };
+                }
             }
         }
         base.OnFrameworkInitializationCompleted();
