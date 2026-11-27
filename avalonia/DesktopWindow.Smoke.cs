@@ -49,6 +49,11 @@ internal sealed partial class DesktopWindow
                     && location.Y + collapse.Bounds.Height <= ClientSize.Height, "最小幅の未読タブにボタンを表示");
                 collapse.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
                 Require(__expanded.Count == 0 && __inbox.Items.Count == 1, "ボタン操作で一括折りたたみ");
+                ShowCollector();
+                OpenNotification(sample);
+                Require(collector?.IsVisible == true && IsVisible && (__inbox.SelectedItem as Row)?.Path == sample &&
+                    item.Unread == 1, "通知クリックで差分収集を隠さず未読を選択");
+                collector!.Close();
                 var details = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "詳細 ▾"));
                 Require(details is { IsEffectivelyVisible: true, Bounds.Width: > 0, Bounds.Height: > 0 },
                     "最小幅でも詳細ボタンが表示される");
@@ -96,7 +101,7 @@ internal sealed partial class DesktopWindow
                 ShowCollector();
                 if (collector?.IsVisible != true || !IsVisible) throw new InvalidOperationException("Independent collector did not open.");
                 collector.Close();
-                File.WriteAllText(report, "PASS: checkpoint, collector, update hook, Avalonia window, scan, stale result suppression, save retry, large unread lookup and SQLite restart.");
+                File.WriteAllText(report, "PASS: checkpoint, collector, notification routing, update hook, Avalonia window, scan, stale result suppression, save retry, large unread lookup and SQLite restart.");
             }
             catch (Exception error) { File.WriteAllText(report, error.ToString()); }
             finally { __closed = true; CloseChildWindows(); Close(); }
