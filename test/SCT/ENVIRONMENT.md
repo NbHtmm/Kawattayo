@@ -58,3 +58,9 @@
 1. `$id=[guid]::NewGuid()` を作り、`pwsh -File test/SCT/Run-DownloadAndOpen.ps1 -Package "<配布ZIP>" -RunId $id -PrepareOnly`。試験用のビューアーは渡された引数の記録だけを行う。既定の関連付けは変更しない。
 2. 検証アカウントに限り、Windowsの設定で準備した `SctTextViewer.exe` を `.txt` の関連アプリにする。この操作はスクリプトでは行わない。次に、同じZIPと同じ実行IDで `-PrepareOnly` を `-DedicatedSession` に替える。準備した実行ファイルに解決できなければ、アプリを起動せずに止まる。
 3. 指定の未読行を右クリックし「ダウンロードして開く」を選び、表示された空の試験用保存先を選ぶ。スクリプトはビューアーへ渡った先が元ファイルではなく保存先であること、元とコピーのSHA-256が一致することを確認する。記録先は `build/OPEN-GUI-007-*/environment-result.json`。
+
+## SCT-SMB-003 のパスと権限の確認
+
+試験専用の共有に `\\SERVER\SHARE\Kawattayo-Sct\Paths` を用意する。中の `readable\測定.txt` と、`readable` 配下の絶対パス長260文字以上の別ファイルはテストユーザーから読めるようにする。`readable\absent-file.txt` は作らず、`denied` は実在するが列挙権限を与えないフォルダにする。共有とACLを用意するのは専用環境の管理者で、スクリプトはそれらに書き込まない。
+
+`pwsh -File test/SCT/Run-SmbPathChecks.ps1 -Package "<配布ZIP>" -FixtureRoot "\\SERVER\SHARE\Kawattayo-Sct\Paths" -LongRelativePath "<readable配下の相対パス>" -DedicatedShare`。試験用アプリの状態列が、Unicode名と長いパスは「正常」、存在しないファイルは「対象なし」、権限不足は「監視失敗」と区別されることを確認する。実サーバーに接続しない準備確認は `-DedicatedShare` の代わりに `-PrepareOnly`。記録は `build/SMB-003-*/environment-result.json`。
