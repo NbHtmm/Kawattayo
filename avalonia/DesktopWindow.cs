@@ -18,7 +18,6 @@ internal sealed partial class DesktopWindow : Window
     private readonly AppState __state;
     private readonly WinDesktop __native;
     private readonly ListBox __inbox = NewList(), __targets = NewList(), __history = NewList();
-    private readonly TabControl __tabs = new();
     private readonly TextBlock __status = new(), __summary = new();
     private readonly TextBox __detailsBox = new()
     {
@@ -29,12 +28,14 @@ internal sealed partial class DesktopWindow : Window
     private readonly HashSet<string> __expanded = new(StringComparer.OrdinalIgnoreCase);
     private bool __closing, __closed;
     private bool __inboxDirty = true, __targetsDirty = true, __historyDirty = true;
-    private int __inboxSort, __targetSort, __historySort = 1;
+    private int __inboxSort, __targetSort, __historySort;
     private bool __inboxReverse, __targetReverse, __historyReverse = true;
 
     private sealed record Row(string Key, WatchItem? Target, string Name, string Detail, DateTimeOffset? At,
         int? Count = null, string? Path = null, FileChange? Change = null, bool Folder = false, int Depth = 0,
-        string? Branch = null, bool Expanded = false, bool Root = false);
+        string? Branch = null, bool Expanded = false, bool Root = false, TargetRowInfo? TargetInfo = null);
+
+    private sealed record TargetRowInfo(string State, DateTimeOffset? Checked, string Recursive, string Feed, string Elapsed, long? ElapsedMs);
 
     internal DesktopWindow(MonitorSession monitor)
     {
@@ -48,17 +49,17 @@ internal sealed partial class DesktopWindow : Window
         MinHeight = 340;
         using (var stream = GetType().Assembly.GetManifestResourceStream("folder-bell.ico"))
             if (stream is not null) Icon = new WindowIcon(stream);
+        __inbox.Name = "Inbox";
+        __targets.Name = "Targets";
+        __history.Name = "History";
         __inbox.ItemTemplate = CreateRowTemplate(__inbox);
         __targets.ItemTemplate = CreateRowTemplate(__targets);
         __history.ItemTemplate = CreateRowTemplate(__history);
-        __tabs.Items.Add(new TabItem { Header = "未読", Content = BuildInbox() });
-        __tabs.Items.Add(new TabItem { Header = "監視対象", Content = BuildTargets() });
-        __tabs.Items.Add(new TabItem { Header = "設定", Content = BuildPreferences() });
-        __tabs.Items.Add(new TabItem { Header = "履歴", Content = BuildHistory() });
-        __tabs.KeyDown += Keyboard;
-        __tabs.SelectionChanged += (_, e) => { if (ReferenceEquals(e.Source, __tabs)) RefreshVisibleList(); };
+        KeyDown += MainKeyboard;
         __inbox.SelectionChanged += (_, _) => RefreshDetails();
         foreach (var list in new[] { __inbox, __targets, __history })
+        {
+            list.KeyDown += Keyboard;
             list.DoubleTapped += async (_, e) =>
             {
                 // 複数選択中も、クリックした行だけを開く。展開ボタンでは開かない。
@@ -66,16 +67,9 @@ internal sealed partial class DesktopWindow : Window
                 if (origin.FindAncestorOfType<ListBoxItem>(includeSelf: true)?.DataContext is Row row)
                     await OpenRow(row, parent: false);
             };
-        var page = new DockPanel { Margin = new Thickness(14, 10) };
-        var header = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new Thickness(0, 0, 0, 10) };
-        header.Children.Add(__summary);
-        var scan = Button("↻ 今すぐ照会", () => _ = __monitor.Scan()); Grid.SetColumn(scan, 1); header.Children.Add(scan);
-        DockPanel.SetDock(header, Dock.Top); page.Children.Add(header);
-        DockPanel.SetDock(__status, Dock.Bottom);
-        __status.Margin = new Thickness(4, 8, 4, 0); page.Children.Add(__status);
-        page.Children.Add(__tabs);
-        Content = page;
-        Styles.Add(new Style(x => x.OfType<ListBoxItem>()) { Setters = { new Setter(ContentControl.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch) } });
+        }
+        Content = BuildMainPage();
+        AddListStyle(this);
         ApplyAppearance();
         __monitor.RowsChanged += Refresh;
         __monitor.ProgressChanged += RefreshStatus;
@@ -91,14 +85,14 @@ internal sealed partial class DesktopWindow : Window
         PropertyChanged += (_, args) =>
         {
             if (args.Property == WindowStateProperty && WindowState == WindowState.Minimized && __native.IsVisible && !__closing)
-                Dispatcher.UIThread.Post(Hide);
+                Dispatcher.UIThread.Post(HideToTray);
         };
         Closing += (_, e) =>
         {
             if (__closed) return;
             e.Cancel = true;
             if (__closing) return;
-            if (__native.IsVisible) { Hide(); return; }
+            if (__native.IsVisible) { HideToTray(); return; }
             Dispatcher.UIThread.Post(async () => await CloseFully());
         };
         Closed += (_, _) => __native.Dispose();
@@ -123,43 +117,34 @@ internal sealed partial class DesktopWindow : Window
         foreach (var control in controls) { control.Margin = new Thickness(0, 0, 6, 3); panel.Children.Add(control); }
         return panel;
     }
-    private static Control Panel(ListBox list, WrapPanel toolbar, Control? footer = null)
-    {
-        var pane = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-        DockPanel.SetDock(toolbar, Dock.Top); pane.Children.Add(toolbar);
-        if (footer is not null) { DockPanel.SetDock(footer, Dock.Bottom); pane.Children.Add(footer); }
-        pane.Children.Add(list);
-        return pane;
-    }
-
-    private Control BuildInbox() => Panel(__inbox, Bar(
-        Button("名前", () => Sort(__inbox, 0)),
-        Button("更新", () => Sort(__inbox, 1)),
-        Button("すべて展開", ExpandAll),
-        Button("すべて折りたたむ", CollapseAll),
-        Button("確認済み", () => Acknowledge(Selected(__inbox))),
-        Button("消失を消す", ClearDeleted),
-        Button("詳細", ToggleDetails)), __detailsBox);
-
+    private static void AddListStyle(Window window) =>
+        window.Styles.Add(new Style(x => x.OfType<ListBoxItem>())
+        {
+            Setters = { new Setter(ContentControl.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch),
+                new Setter(TemplatedControl.PaddingProperty, new Thickness(4, 1)) }
+        });
     private void ToggleDetails()
     {
         __detailsBox.IsVisible = !__detailsBox.IsVisible;
+        if (__detailsToggle is not null) __detailsToggle.Content = __detailsBox.IsVisible ? "詳細 ▴" : "詳細 ▾";
         RefreshDetails();
     }
 
     private void RefreshDetails()
     {
-        if (!__detailsBox.IsVisible) return;
         var rows = Selected(__inbox);
+        __scope.Text = rows.Length == 0 ? "" : $"選択 {rows.Length:N0} 件";
+        if (!__detailsBox.IsVisible) return;
         if (rows.Length == 0)
         {
             __detailsBox.Text = "未読一覧から項目を選んでください。";
             return;
         }
         var row = rows[0];
-        string detectedAt = row.At?.ToString("yyyy/MM/dd HH:mm:ss") ?? "—";
+        string detectedAt = TimeCell(row.At);
+        string modifiedAt = TimeCell(row.Change?.ModifiedAt ?? (row.Root ? row.Target?.LatestFileWriteAt : null));
         string scope = !row.Folder ? "このファイル" : row.Root ? "この監視対象の未読すべて" : "このフォルダ配下の未読";
-        __detailsBox.Text = $"{row.Name} ｜ {row.Detail}\n検知時刻：{detectedAt} ｜ 最終更新者：取得不可\n"
+        __detailsBox.Text = $"{row.Name} ｜ {row.Detail}\n更新時刻：{modifiedAt} ｜ 検知時刻：{detectedAt}\n"
             + $"確認済みの範囲：{scope}" + (rows.Length > 1 ? $"（先頭の選択項目。全 {rows.Length} 件を選択中）" : "")
             + $"\nパス：{row.Path}";
     }
@@ -172,11 +157,12 @@ internal sealed partial class DesktopWindow : Window
 
     private Control BuildTargets()
     {
-        var page = Panel(__targets, Bar(
-            Button("ファイル追加", () => _ = Pick(false)), Button("フォルダ追加", () => _ = Pick(true)),
-            Button("名前", () => Sort(__targets, 0)), Button("最終更新", () => Sort(__targets, 1)),
-            Button("対象ファイル数", () => Sort(__targets, 2))),
-            new TextBlock { Text = "エクスプローラーからドロップして登録。右クリックで監視先ごとの操作。", Margin = new Thickness(6, 4) });
+        var grid = DockPage(BuildHeadings(__targets), __targets);
+        grid.MinWidth = 1300;
+        var scroll = new ScrollViewer { Content = grid, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        var page = DockPage(BuildTargetToolbar(), scroll,
+            SelectionFooter(__targets, "エクスプローラーからドロップして登録できます。"));
         DragDrop.SetAllowDrop(__targets, true);
         DragDrop.AddDragOverHandler(__targets, (_, e) => e.DragEffects =
             e.DataTransfer.Formats.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None);
@@ -191,7 +177,7 @@ internal sealed partial class DesktopWindow : Window
     private Control BuildHistory()
     {
         __filter.TextChanged += (_, _) => RefreshHistory();
-        return Panel(__history, Bar(__filter, Button("名前", () => Sort(__history, 0)), Button("検知時刻", () => Sort(__history, 1))));
+        return DockPage(Bar(__filter), DockPage(BuildHeadings(__history), __history), SelectionFooter(__history));
     }
 
     private void Refresh(bool unreadChanged)
@@ -203,24 +189,30 @@ internal sealed partial class DesktopWindow : Window
         RefreshStatus();
     }
 
-    // 非表示タブは切り替え時に作る。大量の履歴や未読があっても他の操作をブロックしない。
+    // 読み込み量の多い履歴・監視対象は表示されているときだけ更新する。
     private void RefreshVisibleList()
     {
-        switch (__tabs.SelectedIndex)
-        {
-            case 0 when __inboxDirty: RefreshInbox(); break;
-            case 1 when __targetsDirty: RefreshTargets(); break;
-            case 3 when __historyDirty: RefreshHistory(); break;
-        }
+        if (__inboxDirty) RefreshInbox();
+        if (__targetsDirty && __settingsWindow?.IsVisible == true && __settingsTabs.SelectedIndex == 0) RefreshTargets();
+        if (__historyDirty && __historyWindow?.IsVisible == true) RefreshHistory();
     }
 
     private void RefreshStatus()
     {
-        __summary.Text = $"未読 {__state.Items.Sum(x => (long)x.Unread):N0}  ｜  監視対象 {__state.Items.Count:N0}";
+        __summary.Text = $"未読 {__state.Items.Sum(x => (long)x.Unread):N0} 件";
+        __registered.Text = $"登録 {__state.Items.Count:N0} 件";
+        if (__pin is not null) __pin.Content = __state.Pinned ? "最前面 ON" : "最前面 OFF";
+        if (__pause is not null) __pause.Content = __state.Paused ? "監視を再開" : "照会を中断";
+        if (__pauseOption is not null) __pauseOption.Content = __state.Paused ? "監視を再開" : "一時停止";
         int unavailable = __state.Items.Count(item => item.Error is not null);
-        __status.Text = unavailable > 0 ? $"{__monitor.Status}  ｜  監視失敗 {unavailable}件（監視対象を確認）" : __monitor.Status;
+        if (__failures is not null)
+        {
+            __failures.IsVisible = unavailable > 0;
+            __failures.Content = $"監視失敗 {unavailable}件 ›";
+        }
+        __status.Text = __monitor.Status;
+        ToolTip.SetTip(__status, __status.Text);
     }
-
     private void ShowFromTray() { Show(); WindowState = WindowState.Normal; Activate(); }
     private async void RequestExit() => await CloseFully();
     private async Task CloseFully()
@@ -236,6 +228,7 @@ internal sealed partial class DesktopWindow : Window
             return;
         }
         __closed = true;
+        CloseChildWindows();
         Close();
     }
 }

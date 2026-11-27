@@ -26,35 +26,7 @@ internal sealed partial class DesktopWindow
 
     private Control BuildRow(Row row, ListBox source)
     {
-        var line = new Grid { ColumnDefinitions = new(source == __targets ? "*,Auto,Auto" : "*,Auto"), MinHeight = 27 };
-        var name = new DockPanel { Margin = new Thickness(row.Depth * 15, 0, 8, 0) };
-        if (row.Branch is not null)
-        {
-            var toggle = Button(row.Expanded ? "▾" : "▸", () => Toggle(row.Branch));
-            toggle.MinWidth = 23; toggle.Padding = new Thickness(2, 0); toggle.Focusable = false;
-            Avalonia.Automation.AutomationProperties.SetName(toggle, row.Expanded ? "折りたたむ" : "展開する");
-            DockPanel.SetDock(toggle, Dock.Left); name.Children.Add(toggle);
-        }
-        var icon = new TextBlock { Text = row.Folder ? "📁" : "📄", Margin = new Thickness(2, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center };
-        DockPanel.SetDock(icon, Dock.Left); name.Children.Add(icon);
-        var text = new TextBlock { Text = row.Name, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-        name.Children.Add(text); line.Children.Add(name);
-
-        var columns = new TextBlock { Text = row.Detail, Width = source == __targets ? 178 : 145,
-            TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-        ToolTip.SetTip(columns, row.Detail);
-        if (source == __targets)
-        {
-            var count = new TextBlock { Text = row.Count?.ToString("N0") ?? "—", Width = 72,
-                TextAlignment = TextAlignment.Right, Padding = new Thickness(0, 0, 12, 0),
-                VerticalAlignment = VerticalAlignment.Center };
-            ToolTip.SetTip(count, $"対象ファイル数：{count.Text}");
-            Grid.SetColumn(count, 1);
-            line.Children.Add(count);
-        }
-        Grid.SetColumn(columns, source == __targets ? 2 : 1);
-        line.Children.Add(columns);
-        ToolTip.SetTip(name, $"{row.Name}\n{row.Path}\n{row.Detail}");
+        var line = BuildTableRow(row, source);
         // 通常の一覧表示ではメニューを作らず、右クリックやメニューキーで必要になった時だけ組み立てる。
         line.ContextRequested += (_, e) =>
         {
@@ -110,13 +82,16 @@ internal sealed partial class DesktopWindow
                 FileExclusions.Matches(item.Path, __state.ExcludedFilePatterns) ? 0 :
                 item.Baseline is null ? null : item.Baseline == ProbeState.Found ? 1 : 0;
             var state = item.Error is not null ? "監視失敗" : count is null ? "未照会" : count == 0 ? "対象なし" : "正常";
-            var scope = !item.IsFolder ? "ファイル" : item.Recursive ? "再帰" : "直下";
+            var scope = !item.IsFolder ? "—" : item.RecursiveOverride is null ? "デフォルト" : item.Recursive ? "ON" : "OFF";
             var elapsed = item.QueryStart is not null ? "照会中" : item.QueryMs is { } ms ? $"{ms / 1000.0:0.###}秒" : "—";
+            string feed = __monitor.DescribeChangeFeed(item);
+            if (item.Unread > 0) state = "未読 / " + state;
             return new Row(item.Id.ToString(), item, Label(item),
                  $"{Age(item.LatestFileWriteAt)}  ｜  {scope}  ｜  {state}  ｜  {elapsed}{(item.Error is null ? "" : "：" + item.Error)}",
-                item.LatestFileWriteAt, count, item.Path, Folder: item.IsFolder, Root: true);
+                item.LatestFileWriteAt, count, item.Path, Folder: item.IsFolder, Root: true,
+                TargetInfo: new(state, item.LastChecked, scope, feed, elapsed, item.QueryMs));
         });
-        Assign(__targets, Order(rows, __targetSort, __targetReverse));
+        Assign(__targets, SortTargets(rows));
     }
 
     private void RefreshHistory()
@@ -124,9 +99,14 @@ internal sealed partial class DesktopWindow
         __historyDirty = false;
         var filter = __filter.Text?.Trim() ?? "";
         var rows = __state.History
-            .Where(x => filter.Length == 0 || x.Path.Contains(filter, StringComparison.OrdinalIgnoreCase) || x.Kind.Contains(filter, StringComparison.OrdinalIgnoreCase))
-            .Select((x, i) => new Row(i.ToString(), null, Leaf(x.Path), $"{x.Kind}  ｜  {x.At:MM/dd HH:mm:ss}", x.At, Path: x.Path));
-        Assign(__history, Order(rows, __historySort, __historyReverse));
+            .Select((x, i) => new Row(i.ToString(), null, Leaf(x.Path), x.Kind, x.At, Path: x.Path))
+            .Where(x => filter.Length == 0 || x.Path!.Contains(filter, StringComparison.OrdinalIgnoreCase) || x.Detail.Contains(filter, StringComparison.OrdinalIgnoreCase));
+        Assign(__history, __historySort switch
+        {
+            1 => Sorted(rows, x => x.Detail, __historyReverse),
+            2 => Sorted(rows, x => x.Path, __historyReverse),
+            _ => Sorted(rows, x => x.At, __historyReverse)
+        });
     }
 
     private void RefreshInbox()
@@ -147,6 +127,8 @@ internal sealed partial class DesktopWindow
             AppendExpandedRows(rows, target, root.Key, children);
         }
         Assign(__inbox, rows);
+        __emptyInbox.IsVisible = rows.Count == 0;
+        RefreshDetails();
     }
 
     // 展開中の枝だけを深さ優先で投影する。長い階層でも呼び出しスタックを使わない。
@@ -210,10 +192,28 @@ internal sealed partial class DesktopWindow
 
     private static IEnumerable<T> Order<T>(IEnumerable<T> rows, Func<T, Row> select, int column, bool reverse) => column switch
     {
-        1 => reverse ? rows.OrderByDescending(x => select(x).At) : rows.OrderBy(x => select(x).At),
+        1 => Sorted(rows, x => InboxKind(select(x)), reverse),
+        3 => Sorted(rows, x => select(x).At, reverse),
         2 => reverse ? rows.OrderByDescending(x => select(x).Count) : rows.OrderBy(x => select(x).Count),
         _ => reverse ? rows.OrderByDescending(x => select(x).Name, StringComparer.CurrentCultureIgnoreCase)
             : rows.OrderBy(x => select(x).Name, StringComparer.CurrentCultureIgnoreCase)
+    };
+
+    private static IEnumerable<T> Sorted<T, TKey>(IEnumerable<T> items, Func<T, TKey> key, bool descending) =>
+        descending ? items.OrderByDescending(key) : items.OrderBy(key);
+
+    private IEnumerable<Row> SortTargets(IEnumerable<Row> rows) => __targetSort switch
+    {
+        1 => Sorted(rows, x => x.Count, __targetReverse),
+        2 => Sorted(rows, x => x.TargetInfo?.State, __targetReverse),
+        3 => Sorted(rows, x => x.At, __targetReverse),
+        4 => Sorted(rows, x => x.TargetInfo?.Checked, __targetReverse),
+        5 => Sorted(rows, x => x.Folder, __targetReverse),
+        6 => Sorted(rows, x => x.TargetInfo?.Recursive, __targetReverse),
+        7 => Sorted(rows, x => x.TargetInfo?.Feed, __targetReverse),
+        8 => Sorted(rows, x => x.TargetInfo?.ElapsedMs, __targetReverse),
+        9 => Sorted(rows, x => x.Path, __targetReverse),
+        _ => Sorted(rows, x => x.Name, __targetReverse)
     };
 
     private static void Assign(ListBox list, IEnumerable<Row> rows)
@@ -247,9 +247,10 @@ internal sealed partial class DesktopWindow
     private void Sort(ListBox list, int column)
     {
         static void Set(ref int prior, ref bool reverse, int next)
-        { reverse = prior == next ? !reverse : next == 1; prior = next; }
+        { reverse = prior == next ? !reverse : false; prior = next; }
         if (list == __targets) { Set(ref __targetSort, ref __targetReverse, column); RefreshTargets(); }
         else if (list == __history) { Set(ref __historySort, ref __historyReverse, column); RefreshHistory(); }
         else { Set(ref __inboxSort, ref __inboxReverse, column); RefreshInbox(); }
+        UpdateHeadings(list);
     }
 }

@@ -106,6 +106,21 @@ internal sealed partial class MonitorSession
         return bindings;
     }
 
+    internal string DescribeChangeFeed(WatchItem item)
+    {
+        if (__state.Paused) return "一時停止";
+        if (!item.IsFolder && FileExclusions.Matches(item.Path, __state.ExcludedFilePatterns)) return "除外";
+        if (!__state.LowServerLoad) return "オフ（毎回照会）";
+        if (!__checks.TryGetValue(item.Id, out var checkpoint)) return "未確認";
+        return checkpoint.Feed switch
+        {
+            null => "購読枠外（毎回照会）",
+            { Watcher: not null, Failed: false } when checkpoint.Reliable => "通知待機中",
+            { Watcher: not null, Failed: false } => "照会失敗（毎回照会）",
+            _ => "利用不可（毎回照会）"
+        };
+    }
+
     private void ResetQuietScan()
     {
         foreach (var feed in __feeds.Values) feed.Retire();

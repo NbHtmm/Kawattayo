@@ -33,15 +33,15 @@ internal sealed partial class DesktopWindow
                 File.AppendAllText(sample, "追記");
                 await __monitor.Scan();
                 Refresh(true);
-                __tabs.SelectedIndex = 3;
-                __tabs.SelectedIndex = 0;
-                RefreshHistory();
+                var historyButton = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "履歴"));
+                historyButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                Require(__historyWindow is { IsVisible: true, Title: "かわったよ | 変更履歴" }, "独立した履歴ウィンドウ");
                 Require(__inbox.Items.Count == 1 && item.Unread == 1 && __history.Items.Count == 1, "未読表示と履歴");
                 ExpandAll();
                 Require(__inbox.Items.Count == 3 && __inbox.Items.Cast<Row>().Last().Path == sample, "再帰ツリーの展開");
                 await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                 var collapse = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "すべて折りたたむ"));
-                Require(Title == "かわったよ v0.2.3 · Avalonia", "タイトルのバージョン");
+                Require(Title == "かわったよ v0.2.4 · Avalonia", "タイトルのバージョン");
                 Require(collapse is { IsEffectivelyVisible: true, Bounds.Width: > 0, Bounds.Height: > 0 }
                     && collapse.TranslatePoint(default, this) is { } location
                     && location.X >= 0 && location.Y >= 0
@@ -49,7 +49,7 @@ internal sealed partial class DesktopWindow
                     && location.Y + collapse.Bounds.Height <= ClientSize.Height, "最小幅の未読タブにボタンを表示");
                 collapse.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
                 Require(__expanded.Count == 0 && __inbox.Items.Count == 1, "ボタン操作で一括折りたたみ");
-                var details = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "詳細"));
+                var details = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "詳細 ▾"));
                 Require(details is { IsEffectivelyVisible: true, Bounds.Width: > 0, Bounds.Height: > 0 },
                     "最小幅でも詳細ボタンが表示される");
                 Require(!__detailsBox.IsVisible, "詳細は初期状態で閉じている");
@@ -59,13 +59,21 @@ internal sealed partial class DesktopWindow
                 Require(__detailsBox.IsVisible && __detailsBox.Text?.Contains(sample) == true, "詳細に選択項目のパスを表示");
                 details.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
                 Require(!__detailsBox.IsVisible, "ボタンを再度押すと詳細を閉じる");
-                __tabs.SelectedIndex = 1;
-                RefreshTargets();
+                var settingsButton = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "設定…"));
+                settingsButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                Require(__settingsWindow is { IsVisible: true, Title: "かわったよ | 設定" } &&
+                    __settingsTabs.Items.Cast<TabItem>().Select(tab => tab.Header).SequenceEqual(new object[] { "監視対象", "動作と表示" }),
+                    "独立した設定のタブ構成");
                 __targets.SelectedIndex = 0;
-                Require(Selected(__targets).Single().Count == 1, "監視対象列");
-                __tabs.SelectedIndex = 2;
+                Require(Selected(__targets).Single().Count == 1 && __columnButtons[__targets].Length == 10, "監視対象列");
+                Require(__columnButtons[__inbox].Length == 5 && __columnButtons[__history].Length == 3, "未読と履歴の列構成");
+                Require(!this.GetVisualDescendants().OfType<TabControl>().Any(), "メインに設定・履歴タブを出さない");
+                __settingsTabs.SelectedIndex = 1;
                 await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                 Require(Content is DockPanel && IsVisible, "実ウィンドウと最小サイズの設定");
+                SaveLayout(this, Path.Combine(fixture, "inbox.png"));
+                SaveLayout(__settingsWindow!, Path.Combine(fixture, "settings.png"));
+                SaveLayout(__historyWindow!, Path.Combine(fixture, "history.png"));
                 // 読了直後、結果の反映前に監視条件が変わるケースを競合なしで再現する。
                 File.AppendAllText(sample, "旧条件の追加");
                 bool invalidated = false;
@@ -88,8 +96,17 @@ internal sealed partial class DesktopWindow
                 File.WriteAllText(report, "PASS: Avalonia window, scan, stale result suppression, save retry, large unread lookup and SQLite restart.");
             }
             catch (Exception error) { File.WriteAllText(report, error.ToString()); }
-            finally { __closed = true; Close(); }
+            finally { __closed = true; CloseChildWindows(); Close(); }
         };
+    }
+
+    private static void SaveLayout(Window window, string path)
+    {
+        if (window.Content is not Control content || content.Bounds.Width < 1 || content.Bounds.Height < 1) return;
+        using var bitmap = new Avalonia.Media.Imaging.RenderTargetBitmap(
+            new PixelSize((int)Math.Ceiling(content.Bounds.Width), (int)Math.Ceiling(content.Bounds.Height)));
+        bitmap.Render(content);
+        bitmap.Save(path, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
     }
 
     private static async Task VerifySaveRetry()

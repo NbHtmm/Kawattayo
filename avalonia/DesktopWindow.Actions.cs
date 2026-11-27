@@ -14,9 +14,10 @@ internal sealed partial class DesktopWindow
     {
         try
         {
+            var owner = __settingsWindow?.IsVisible == true ? __settingsWindow : this;
             IEnumerable<IStorageItem> picked = folders
-                ? await StorageProvider.OpenFolderPickerAsync(new() { Title = "監視するフォルダを選択", AllowMultiple = true })
-                : await StorageProvider.OpenFilePickerAsync(new() { Title = "監視するファイルを選択", AllowMultiple = true });
+                ? await owner.StorageProvider.OpenFolderPickerAsync(new() { Title = "監視するフォルダを選択", AllowMultiple = true })
+                : await owner.StorageProvider.OpenFilePickerAsync(new() { Title = "監視するファイルを選択", AllowMultiple = true });
             await Register(picked.Select(item => item.TryGetLocalPath()).OfType<string>());
         }
         catch (Exception error) { WinDesktop.Message("選択画面を開けません：" + error.Message, Handle); }
@@ -65,7 +66,7 @@ internal sealed partial class DesktopWindow
         dialog.Content = controls;
         dialog.Opened += (_, _) => input.Focus();
         input.KeyDown += (_, e) => { if (e.Key == Key.Enter) dialog.Close(true); };
-        if (await dialog.ShowDialog<bool>(this) && __state.Items.Contains(item))
+        if (await dialog.ShowDialog<bool>(__settingsWindow?.IsActive == true ? __settingsWindow : this) && __state.Items.Contains(item))
         {
             item.DisplayName = input.Text?.Trim() ?? "";
             __monitor.UpdateSettings();
@@ -179,18 +180,18 @@ internal sealed partial class DesktopWindow
         catch (Exception error) { if (!__closing) WinDesktop.Message("コピーできません：" + error.Message, Handle); }
     }
 
+    private async void MainKeyboard(object? sender, KeyEventArgs e)
+    {
+        if ((e.KeyModifiers & KeyModifiers.Control) == 0 || e.Key is not (Key.R or Key.OemComma)) return;
+        e.Handled = true;
+        if (e.Key == Key.R) await __monitor.Scan();
+        else ShowSettings();
+    }
+
     private async void Keyboard(object? sender, KeyEventArgs e)
     {
+        if (sender is not ListBox list || e.Source is TextBox or Avalonia.Controls.Button) return;
         bool ctrl = (e.KeyModifiers & KeyModifiers.Control) != 0;
-        if (ctrl && e.Key is Key.R or Key.OemComma)
-        {
-            e.Handled = true;
-            if (e.Key == Key.R) await __monitor.Scan();
-            else __tabs.SelectedIndex = 2;
-            return;
-        }
-        var list = __tabs.SelectedIndex switch { 0 => __inbox, 1 => __targets, 3 => __history, _ => null };
-        if (list is null || e.Source is TextBox) return;
         var rows = Selected(list);
         if (rows.Length == 0) return;
         if (e.Key == Key.Enter) { e.Handled = true; await OpenRow(rows[0], false); }
