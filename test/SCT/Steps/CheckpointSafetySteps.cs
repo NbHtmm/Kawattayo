@@ -181,6 +181,60 @@ public sealed class CheckpointSafetySteps
         Assert.Equal(NewContent, File.ReadAllText(Path.Combine(_root, Active)));
     }
 
+    [Given("^基準がない試験用の保存先がある$")]
+    public async Task EmptyCatalog()
+    {
+        var result = await RunAsync("initial-list", "checkpoint", "list");
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.Output);
+    }
+
+    [When("^存在しない監視フォルダで基準を作る$")]
+    public async Task TryMissingRoot() =>
+        _responses = [await RunAsync("create-missing", "checkpoint", "create",
+            "--name", "absent", "--root", Path.Combine(_root, "nonexistent"))];
+
+    [Then("^基準作成に失敗し、一覧は空のままである$")]
+    public async Task AssertNoFailedCheckpoint()
+    {
+        var rejected = Assert.Single(_responses);
+        Assert.Equal(4, rejected.ExitCode);
+        Assert.NotEmpty(rejected.Error);
+        Assert.Empty(rejected.Output);
+        var result = await RunAsync("after-failed-create", "checkpoint", "list");
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.Output);
+    }
+
+    [When("^長さの境界、相対パス、重複引数で基準を作る$")]
+    public async Task TryNameAndArgumentBoundaries()
+    {
+        _id = await Create("a", "minimum-name");
+        _otherId = await Create(new string('b', 100), "maximum-name");
+        _responses =
+        [
+            await RunAsync("blank-name", "checkpoint", "create", "--name", " ", "--root", _root),
+            await RunAsync("long-name", "checkpoint", "create", "--name", new string('c', 101), "--root", _root),
+            await RunAsync("relative-root", "checkpoint", "create", "--name", "relative", "--root", "folder"),
+            await RunAsync("duplicate-name-arg", "checkpoint", "create", "--name", "first", "--name", "second", "--root", _root),
+        ];
+    }
+
+    [Then("^許容範囲の名前だけが登録される$")]
+    public async Task AssertOnlyValidNames()
+    {
+        Assert.All(_responses, response =>
+        {
+            Assert.Equal(2, response.ExitCode);
+            Assert.Empty(response.Output);
+            Assert.NotEmpty(response.Error);
+        });
+        var result = await RunAsync("final-list", "checkpoint", "list");
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(new[] { _id, _otherId }.Order(),
+            result.Output.Split('\n').Select(line => line.Split('\t')[0]).Order());
+    }
+
     private void Write(string name, string contents) => File.WriteAllText(Path.Combine(_root, name), contents);
 
     private async Task<string> Create(string name, string label, params string[] options)

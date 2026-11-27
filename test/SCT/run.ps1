@@ -1,6 +1,7 @@
 ﻿. (Join-Path $PSScriptRoot 'Evidence.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSetup.ps1')
 . (Join-Path $PSScriptRoot 'UnreadScenario.ps1')
+. (Join-Path $PSScriptRoot 'MonitorLifecycle.ps1')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -94,12 +95,12 @@ try {
         $desktopReady = $true
     } catch {
         $message = $_.Exception.Message
-        foreach ($id in 'SCT-GUI-001','SCT-GUI-002') {
+        foreach ($id in 'SCT-GUI-001','SCT-GUI-002','SCT-GUI-004','SCT-GUI-005','SCT-GUI-011','SCT-GUI-013') {
             $results.Add(@{ id = $id; outcome = 'BLOCKED'; error = $message })
             Write-Host "BLOCKED ${id}: $message"
         }
     }
-    foreach ($id in 'SCT-CLI-001','SCT-CLI-002','SCT-CLI-003','SCT-CLI-004','SCT-CLI-005','SCT-CLI-006') {
+    foreach ($id in 'SCT-CLI-001','SCT-CLI-002','SCT-CLI-003','SCT-CLI-004','SCT-CLI-005','SCT-CLI-006','SCT-CLI-008','SCT-CLI-009') {
         Invoke-Case $id { Invoke-CheckpointScenario -CaseId $id }
     }
 
@@ -122,6 +123,10 @@ try {
             }
         }
         Invoke-Case 'SCT-GUI-002' { Invoke-SctUnreadScenario -Package $package -Work (Join-Path $out 'unread') }
+        Invoke-Case 'SCT-GUI-004' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-004') 'FileLifecycle' }
+        Invoke-Case 'SCT-GUI-005' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-005') 'FolderOffline' }
+        Invoke-Case 'SCT-GUI-011' { Invoke-SctMonitorLifecycle $package (Join-Path $out 'SCT-GUI-011') 'Exclusions' }
+        Invoke-Case 'SCT-GUI-013' { Invoke-SctExistingInstance $package (Join-Path $out 'SCT-GUI-013') }
     }
     if ($results.Where({ $_.outcome -ne 'PASS' }).Count -gt 0) { $status = 1 }
 } catch {
@@ -146,6 +151,11 @@ try {
                 $result.testCode = 'test/SCT/UnreadScenario.ps1'
                 $result.evidence = @('unread/observations.txt', 'unread/ui-on-failure.txt' |
                     Where-Object { Test-Path -LiteralPath (Join-Path $out $_) })
+            }
+            if ($result.id -in 'SCT-GUI-004','SCT-GUI-005','SCT-GUI-011','SCT-GUI-013') {
+                $result.testCode = 'test/SCT/MonitorLifecycle.ps1'
+                $log = "$($result.id)/observations.txt"
+                if (Test-Path -LiteralPath (Join-Path $out $log)) { $result.evidence = @($log) }
             }
             $result.specification = 'test/SCT/SPEC.md#' + $result.id.ToLowerInvariant()
         }
