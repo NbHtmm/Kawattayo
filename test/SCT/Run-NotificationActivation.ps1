@@ -64,9 +64,9 @@ try {
     $element = [Windows.Automation.AutomationElement]
     $scope = [Windows.Automation.TreeScope]::Descendants
     $edit = $collector.FindFirst($scope,[Windows.Automation.PropertyCondition]::new($element::ControlTypeProperty,[Windows.Automation.ControlType]::Edit))
-    $input = $edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
+    $draftValue = $edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
     $draft = 'draft must survive clicking the notification'
-    $input.SetValue($draft)
+    $draftValue.SetValue($draft)
     $view.GetCurrentPattern([Windows.Automation.WindowPattern]::Pattern).Close()
     [void](Wait-SctUi 'monitor hidden but collector visible' {
         !(Get-SctOwnedWindow $p.Id 'かわったよ v' -Prefix) -and (Get-SctOwnedWindow $p.Id 'かわったよ · 差分収集')
@@ -96,7 +96,7 @@ try {
         return $false
     })
     $collectorNow = Get-SctOwnedWindow $p.Id 'かわったよ · 差分収集'
-    if (!$collectorNow -or $collectorNow.Current.NativeWindowHandle -ne $handle -or $input.Current.Value -cne $draft) {
+    if (!$collectorNow -or $collectorNow.Current.NativeWindowHandle -ne $handle -or $draftValue.Current.Value -cne $draft) {
         throw 'The collector or its unsaved input was not preserved.'
     }
     $outcome = 'PASS'
