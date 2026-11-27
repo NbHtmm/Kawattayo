@@ -1,4 +1,4 @@
-﻿. (Join-Path $PSScriptRoot 'CaseLedger.ps1')
+. (Join-Path $PSScriptRoot 'CaseLedger.ps1')
 . (Join-Path $PSScriptRoot 'Evidence.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSetup.ps1')
 . (Join-Path $PSScriptRoot 'UnreadScenario.ps1')
@@ -121,7 +121,7 @@ try {
     }
 
     $volume = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($out))
-    foreach ($ntfsCase in 'SCT-CLI-012','SCT-CLI-014') {
+    foreach ($ntfsCase in 'SCT-CLI-007','SCT-CLI-012','SCT-CLI-014') {
         if ($volume.DriveFormat -eq 'NTFS') {
             Invoke-Case $ntfsCase { Invoke-CheckpointScenario -CaseId $ntfsCase }
         } else {
@@ -191,6 +191,7 @@ try {
                 $result.specification = 'test/SCT/Features/CheckpointSafety.feature'
                 $result.testCode = 'test/SCT/Steps/CheckpointSafetySteps.cs'
             }
+            if ($caseId -eq 'SCT-CLI-007') { $result.testCode = 'test/SCT/Steps/CheckpointJunctionSteps.cs' }
             if ($caseId -eq 'SCT-CLI-011') { $result.testCode = 'test/SCT/Steps/CheckpointVolumeSteps.cs' }
             if ($caseId -eq 'SCT-CLI-012') { $result.testCode = 'test/SCT/Steps/CheckpointZoneSteps.cs' }
             if ($caseId -eq 'SCT-CLI-013') { $result.testCode = 'test/SCT/Steps/CheckpointLockedSourceSteps.cs' }
