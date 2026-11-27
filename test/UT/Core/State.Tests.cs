@@ -122,6 +122,77 @@ public sealed class StateTests
         Assert.Same(target.Inventory, copy.Items[0].Inventory);
     }
 
+    [Fact]
+    public void ObserveFolder_SuppressedDeletionAdvancesBaselineAndReappearanceIsNew()
+    {
+        var item = new WatchItem { Path = "watched", IsFolder = true };
+        var events = new List<(string, string)>();
+        void Record(string path, string kind) => events.Add((path, kind));
+        item.ObserveFolder(new(Snapshot(("log.txt", s_first))), s_now);
+        var empty = Snapshot();
+
+        Assert.Null(item.ObserveFolder(new(empty), s_now, Record, notifyDeleted: false));
+        Assert.Same(empty, item.Inventory);
+        Assert.Null(item.LatestFileWriteAt);
+        Assert.Empty(events);
+        Assert.Equal(0, item.Unread);
+
+        Assert.NotNull(item.ObserveFolder(new(Snapshot(("log.txt", s_first))), s_now, Record, notifyDeleted: false));
+        Assert.Equal((System.IO.Path.Combine("watched", "log.txt"), "追加"), Assert.Single(events));
+        Assert.Equal(1, item.Unread);
+    }
+
+    [Fact]
+    public void ObserveFolder_ChangingExclusionsDoesNotInventEvents()
+    {
+        var item = new WatchItem { IsFolder = true };
+        var log = Snapshot(("keep.log", s_first), ("~$lock.docx", s_second));
+        item.ObserveFolder(new(log), s_now);
+
+        var excludesLock = new[] { "~$*" };
+        var filtered = Snapshot(("keep.log", s_first));
+        Assert.Null(item.ObserveFolder(new(filtered) { Exclusions = excludesLock }, s_now));
+        Assert.Same(filtered, item.Inventory);
+        Assert.Equal(excludesLock, item.InventoryExclusions);
+        Assert.Equal(s_now.AddMinutes(-3), item.LatestFileWriteAt);
+
+        Assert.Null(item.ObserveFolder(new(log), s_now));
+        Assert.Same(log, item.Inventory);
+        Assert.Empty(item.InventoryExclusions!);
+        Assert.Equal(s_now.AddMinutes(-2), item.LatestFileWriteAt);
+        Assert.Equal(0, item.Unread);
+    }
+
+    [Fact]
+    public void ObserveFolder_DirectoryStampChangeIsPublishedEvenWithoutFileChanges()
+    {
+        var item = new WatchItem { IsFolder = true };
+        var inventory = Snapshot(("log.txt", s_first));
+        item.ObserveFolder(new(inventory) { DirectoryStamp = s_first.Modified }, s_now);
+
+        Assert.Null(item.ObserveFolder(new(inventory) { DirectoryStamp = s_first.Modified }, s_now));
+        Assert.NotNull(item.ObserveFolder(new(inventory) { DirectoryStamp = s_second.Modified }, s_now));
+        var pending = Assert.Single(item.PendingFiles);
+        Assert.Equal(".", pending.Key);
+        Assert.Equal("更新", pending.Value.Kind);
+        Assert.Equal(s_now.AddMinutes(-2), pending.Value.ModifiedAt);
+        Assert.Equal(s_now, item.LastChanged);
+        Assert.Equal(1, item.Unread);
+    }
+
+    [Fact]
+    public void ObserveFolder_UnreadAndPendingCountsSaturateInsteadOfOverflowing()
+    {
+        var item = new WatchItem { IsFolder = true, Unread = int.MaxValue };
+        item.ObserveFolder(new(Snapshot(("log.txt", s_first))), s_now);
+        item.PendingFiles["log.txt"] = new("log.txt", "更新", s_now.AddSeconds(-1), Count: int.MaxValue);
+
+        Assert.NotNull(item.ObserveFolder(new(Snapshot(("log.txt", s_second))), s_now));
+        Assert.Equal(int.MaxValue, item.Unread);
+        Assert.Equal(int.MaxValue, item.PendingFiles["log.txt"].Count);
+        Assert.Equal(0, item.SavedUnreadWithoutDetails);
+    }
+
     private static Dictionary<string, Fingerprint> Snapshot(params (string Path, Fingerprint Data)[] entries) =>
         entries.ToDictionary(entry => entry.Path, entry => entry.Data, StringComparer.OrdinalIgnoreCase);
 }
