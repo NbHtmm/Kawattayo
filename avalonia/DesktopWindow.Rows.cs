@@ -26,7 +26,7 @@ internal sealed partial class DesktopWindow
 
     private Control BuildRow(Row row, ListBox source)
     {
-        var line = BuildTableRow(row, source);
+        var line = new TableRowSurface(source, BuildTableRow(row, source));
         // 通常の一覧表示ではメニューを作らず、右クリックやメニューキーで必要になった時だけ組み立てる。
         line.ContextRequested += (_, e) =>
         {

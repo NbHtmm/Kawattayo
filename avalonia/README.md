@@ -1,4 +1,4 @@
-# かわったよ Avalonia 版（v0.2.5）
+# かわったよ Avalonia 版（v0.2.6）
 
 Windows 11 x64 用の別ビルドです。Native AOT の配布 ZIP を展開し、
 `かわったよ.exe` を実行します。別途 .NET ランタイムや SQLite のインストールは不要です。
@@ -13,6 +13,8 @@ Avalonia 版の展開先に**コピー**します。旧アプリや元のファ�
 v0.1.3 以前の `cache.json` は読み込みません。実際の監視パスや履歴を含むため共有・公開しないでください。
 
 ## 操作
+
+一覧は交互の背景色と区切り線で行を分け、選択中の行は左端のラインでも示します。
 
 - 「未読」は未確認の変更のみ表示。フォルダは既定で折りたたまれます。クリックで選択、開閉ボタンで展開、ダブルクリックで関連アプリやエクスプローラーを開きます。
 - 「設定…」で子ウィンドウを開きます。「監視対象」と「動作と表示」の2タブがあります。「監視対象」はファイル・フォルダを選択するか、エクスプローラーからドロップして追加します。対象数は最後に正常に取得した除外後のファイル数です。最終更新・状態・照会時間も確認できます。
@@ -35,7 +37,7 @@ Avalonia の画面・ビルド設定は `avalonia/`、
 .\tool\build.bat
 ```
 
-`build.bat` は .NET SDK を直接呼び出し、PowerShell スクリプトを実行しません。実行ファイルと DLL は `bin` に出力します。配布 ZIP の作成は別の操作です。PowerShell スクリプトの実行が許可されている開発環境で `.\tool\package-avalonia.ps1` を実行してください。Visual Studio で開く場合は avalonia/Kawattayo.Avalonia.csproj を選んでください。ZIP の出力は `build/Kawattayo_v0.2.5_Avalonia_Windows_x64.zip` です。
+`build.bat` は .NET SDK を直接呼び出し、PowerShell スクリプトを実行しません。実行ファイルと DLL は `bin` に出力します。配布 ZIP の作成は別の操作です。PowerShell スクリプトの実行が許可されている開発環境で `.\tool\package-avalonia.ps1` を実行してください。Visual Studio で開く場合は avalonia/Kawattayo.Avalonia.csproj を選んでください。ZIP の出力は `build/Kawattayo_v0.2.6_Avalonia_Windows_x64.zip` です。
 `-p:KawattayoUseNls=true` は比較用。標準設定では Windows の ICU を使います。
 NLS にしても Skia・HarfBuzz の DLL は不要にはなりません。
 

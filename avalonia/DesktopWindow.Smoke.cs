@@ -41,7 +41,7 @@ internal sealed partial class DesktopWindow
                 Require(__inbox.Items.Count == 3 && __inbox.Items.Cast<Row>().Last().Path == sample, "再帰ツリーの展開");
                 await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                 var collapse = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "すべて折りたたむ"));
-                Require(Title == "かわったよ v0.2.5 · Avalonia", "タイトルのバージョン");
+                Require(Title == "かわったよ v0.2.6 · Avalonia", "タイトルのバージョン");
                 Require(collapse is { IsEffectivelyVisible: true, Bounds.Width: > 0, Bounds.Height: > 0 }
                     && collapse.TranslatePoint(default, this) is { } location
                     && location.X >= 0 && location.Y >= 0
@@ -71,9 +71,6 @@ internal sealed partial class DesktopWindow
                 __settingsTabs.SelectedIndex = 1;
                 await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                 Require(Content is DockPanel && IsVisible, "実ウィンドウと最小サイズの設定");
-                SaveLayout(this, Path.Combine(fixture, "inbox.png"));
-                SaveLayout(__settingsWindow!, Path.Combine(fixture, "settings.png"));
-                SaveLayout(__historyWindow!, Path.Combine(fixture, "history.png"));
                 // 読了直後、結果の反映前に監視条件が変わるケースを競合なしで再現する。
                 File.AppendAllText(sample, "旧条件の追加");
                 bool invalidated = false;
@@ -93,11 +90,100 @@ internal sealed partial class DesktopWindow
                 Require(saved.Items.Single().PendingFiles.Count == 1 && saved.History.Single().Path == sample, "再起動時のSQLite復元");
                 var json = File.ReadAllText(Path.Combine(fixture, AppDefaults.SettingsFileName));
                 Require(!json.Contains("PendingFiles") && !json.Contains("History") && !json.Contains("Inventory"), "設定専用JSON");
+                await CapturePreviewScreens(fixture);
                 File.WriteAllText(report, "PASS: Avalonia window, scan, stale result suppression, save retry, large unread lookup and SQLite restart.");
             }
             catch (Exception error) { File.WriteAllText(report, error.ToString()); }
             finally { __closed = true; CloseChildWindows(); Close(); }
         };
+    }
+
+    // 実データに触れず、運用中に近い複数行と階層を全画面で撮影する。
+    private async Task CapturePreviewScreens(string folder)
+    {
+        var now = DateTimeOffset.Now;
+        const string root = @"C:\サンプル\共有";
+        var design = new WatchItem
+        {
+            Path = Path.Combine(root, "設計資料"), IsFolder = true, Recursive = true, Unread = 4,
+            LastChanged = now.AddMinutes(-2), LastChecked = now, LatestFileWriteAt = now.AddMinutes(-2), QueryMs = 154
+        };
+        var files = new (string Path, string Kind, int Minutes)[]
+        {
+            (@"図面\制御盤レイアウト.pdf", "更新", 2),
+            (@"図面\配線図.dwg", "追加", 5),
+            (@"議事録\定例会議.docx", "更新", 12),
+            ("レビュー予定.xlsx", "消失", 27)
+        };
+        foreach (var (path, kind, mins) in files)
+            design.PendingFiles[path] = new(path, kind, now.AddMinutes(-mins), now.AddMinutes(-mins));
+        design.Inventory = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, _, _) in files.Take(3)) design.Inventory[path] = new(10, 20, 30);
+
+        var sales = new WatchItem { Path = Path.Combine(root, "週次集計.xlsx"), Unread = 1, LastChange = "更新",
+            Baseline = ProbeState.Found, LastChanged = now.AddMinutes(-34), LastChecked = now,
+            LatestFileWriteAt = now.AddMinutes(-34), QueryMs = 18 };
+        var notes = new WatchItem { Path = Path.Combine(root, "作業手順"), IsFolder = true,
+            LastChecked = now, Inventory = new(StringComparer.OrdinalIgnoreCase) { ["手順書.pdf"] = new(10, 20, 30) }, QueryMs = 31 };
+        var offline = new WatchItem { Path = Path.Combine(root, "保管庫"), IsFolder = true,
+            LastChecked = now, Error = "共有フォルダに接続できません" };
+        __state.Items.Clear();
+        __state.Items.AddRange([design, sales, notes, offline]);
+        __state.History.Clear();
+        foreach (var (path, kind, mins) in files) __state.History.Enqueue(new(now.AddMinutes(-mins), Path.Combine(design.Path, path), kind));
+        __state.History.Enqueue(new(now.AddMinutes(-34), sales.Path, "更新"));
+        __state.ExcludedFilePatterns = ["~$*", "*.tmp"];
+        __state.Paused = false;
+        Refresh(true);
+
+        Width = 940;
+        Height = 510;
+        ExpandAll();
+        __inbox.SelectedIndex = 2;
+        ToggleDetails();
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        VerifyRowColors();
+        SaveLayout(this, Path.Combine(folder, "01_Inbox.png"));
+
+        __settingsWindow!.Width = 1510;
+        __settingsWindow.Height = 480;
+        __settingsTabs.SelectedIndex = 0;
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        __targets.SelectedIndex = 0;
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        SaveLayout(__settingsWindow, Path.Combine(folder, "02_Watch_Targets.png"));
+
+        __settingsWindow.Width = 900;
+        __settingsWindow.Height = 790;
+        __settingsTabs.SelectedIndex = 1;
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        SaveLayout(__settingsWindow, Path.Combine(folder, "03_Behavior_and_Display.png"));
+
+        __historyWindow!.Width = 980;
+        __historyWindow.Height = 460;
+        __history.SelectedIndex = 2;
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        SaveLayout(__historyWindow, Path.Combine(folder, "04_History.png"));
+    }
+
+    private void VerifyRowColors()
+    {
+        var surfaces = __inbox.GetVisualDescendants().OfType<TableRowSurface>().ToArray();
+        Require(surfaces.Length >= 3, "複数の未読行を描画");
+        Require(surfaces.All(x => x.BorderThickness.Bottom == 1 && x.BorderBrush is not null), "すべての行に区切り線");
+        Require(surfaces.Take(3).Select(x => x.Background).Distinct().Count() == 3, "交互の行色と選択色を区別");
+
+        // 選択変更やテーマ変更でも、行を作り直さずに色が追従する。
+        var initialColor = surfaces[0].Background;
+        __inbox.SelectedIndex = 0;
+        Require(!Equals(initialColor, surfaces[0].Background), "選択変更で行色が切り替わる");
+        var lightSelection = surfaces[0].Background;
+        __state.DarkMode = true;
+        ApplyAppearance();
+        Require(!Equals(lightSelection, surfaces[0].Background), "ダークモードの配色を反映");
+        __state.DarkMode = false;
+        ApplyAppearance();
+        __inbox.SelectedIndex = 2;
     }
 
     private static void SaveLayout(Window window, string path)

@@ -44,7 +44,7 @@ internal sealed partial class DesktopWindow
         }
         __columnButtons[list] = buttons;
         UpdateHeadings(list);
-        return new Border { Padding = new Thickness(4, 0, 4, 0), Child = table };
+        return new Border { Padding = new Thickness(7, 0, 4, 0), Child = table };
     }
 
     private void UpdateHeadings(ListBox list)
@@ -70,7 +70,7 @@ internal sealed partial class DesktopWindow
     private Control BuildTableRow(Row row, ListBox list)
     {
         var line = TableGrid(list);
-        line.MinHeight = Math.Max(24, FontSize * 1.55);
+        line.MinHeight = Math.Max(27, FontSize * 1.65);
         if (list == __history)
         {
             AddCell(line, 0, TimeCell(row.At));
@@ -122,7 +122,7 @@ internal sealed partial class DesktopWindow
             Margin = new Thickness(1, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };
         DockPanel.SetDock(icon, Dock.Left);
         name.Children.Add(icon);
-        name.Children.Add(new TextBlock { Text = row.Name, TextTrimming = TextTrimming.CharacterEllipsis,
+        name.Children.Add(new TextBlock { Text = row.Name, FontWeight = row.Folder ? FontWeight.SemiBold : FontWeight.Normal, TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center });
         ToolTip.SetTip(name, $"{row.Name}\n{row.Path}\n{row.Detail}");
         return name;
