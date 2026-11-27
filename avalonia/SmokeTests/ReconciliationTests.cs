@@ -47,6 +47,39 @@ internal static class ReconciliationTests
         finally { await monitor.Close(); }
     }
 
+    internal static async Task VerifyBatchRegistration(string fixture)
+    {
+        var profile = Directory.CreateDirectory(Path.Combine(fixture, "registration-profile")).FullName;
+        var root = Directory.CreateDirectory(Path.Combine(fixture, "registration-source")).FullName;
+        var file = Path.Combine(root, "sample.txt");
+        var missing = Path.Combine(root, "not-found.txt");
+        var settings = Path.Combine(profile, AppDefaults.SettingsFileName);
+        File.WriteAllText(file, "baseline");
+        var store = StateStore.BesideExecutable(profile);
+        var session = new MonitorSession(store, new ManualTimer(), new ManualTimer());
+        try
+        {
+            session.State.LowServerLoad = false;
+            session.State.RecursiveFolders = true;
+            var failures = await session.Register([root, file, file, missing, settings]);
+            Require(failures.Length == 2 && failures[0].StartsWith(missing, StringComparison.Ordinal) &&
+                failures[1].StartsWith(settings, StringComparison.Ordinal), "Batch registration reports both invalid paths");
+
+            var targets = session.State.Items.ToDictionary(x => x.Path, StringComparer.OrdinalIgnoreCase);
+            Require(targets.Count == 2 && targets[root] is { IsFolder: true, Recursive: true } &&
+                targets[file] is { IsFolder: false, Recursive: false }, "Batch registration keeps unique valid file and folder");
+            Require((await session.Register([root + Path.DirectorySeparatorChar, file])).Length == 0 &&
+                session.State.Items.Select(x => x.Id).SequenceEqual(targets.Values.Select(x => x.Id)),
+                "Registering the same normalized paths preserves existing target IDs");
+        }
+        finally { await session.Close(); }
+
+        var restored = store.Load().State.Items;
+        Require(restored.Count == 2 && restored.Select(x => x.Path).ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals([root, file]),
+            "Restart restores only the valid unique registrations");
+    }
+
+
     internal static async Task VerifySettled(string fixture)
     {
         var dir = Directory.CreateDirectory(Path.Combine(fixture, "settled-profile")).FullName;
