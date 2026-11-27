@@ -79,4 +79,38 @@ public sealed class SettledNotificationsTests
         void Observe(long now) =>
             pending.Observe(id, true, now, 10, _ => new Fingerprint(100, 1, 10), _ => true, (_, _) => count++);
     }
+
+    [Fact]
+    public void Queue_ReplacesCaseVariantAndOnlyEmitsLatestKind()
+    {
+        var pending = new SettledNotifications();
+        var id = Guid.NewGuid();
+        pending.Queue(id, "Report.txt", "Report.txt", "出現");
+        pending.Queue(id, "report.txt", "report.txt", "更新");
+
+        Assert.True(pending.HasPending(id));
+        Assert.Equal("report.txt", Assert.Single(pending.Paths(id)));
+        var notifications = new List<(string, string)>();
+        pending.Observe(id, true, 100, 0, _ => new Fingerprint(1, 1, 1),
+            _ => true, (path, kind) => notifications.Add((path, kind)));
+        Assert.Equal(("report.txt", "更新"), Assert.Single(notifications));
+        Assert.False(pending.HasPending(id));
+    }
+
+    [Fact]
+    public void Remove_LastEntryDropsOnlyItsOwnRegistration()
+    {
+        var pending = new SettledNotifications();
+        var first = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        pending.Queue(first, "report.txt", "report.txt", "更新");
+        pending.Queue(other, "report.txt", "report.txt", "更新");
+        pending.Remove(Guid.NewGuid(), "report.txt");
+        pending.Remove(first, "REPORT.TXT");
+        pending.Remove(first, "REPORT.TXT");
+
+        Assert.False(pending.HasPending(first));
+        Assert.True(pending.HasPending(other));
+        Assert.Equal(1, pending.Count);
+    }
 }
