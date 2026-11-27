@@ -16,3 +16,4 @@ source,signature,case_ids,scope
 "src/Windows/LocalDownloads.cs","ShareFileWatch.LocalDownloads.SaveOne(string folder, DownloadRequest request, CancellationToken stop)","SCT-CLI-001;SCT-GUI-008","No overwrite and no stale copy on files changed after preview"
 "src/Windows/LocalDownloads.cs","ShareFileWatch.LocalDownloads.CopyZone(string source, string staging, CancellationToken stop)","SCT-CLI-012","Exact named NTFS stream bytes are copied alongside plain text"
 "src/Windows/Monitoring/MonitorSession.Registrations.cs","ShareFileWatch.MonitorSession.RemoveTargets(IEnumerable<WatchItem> targets)","SCT-GUI-018","Remove one ID and preserve other unread, history, and both files"
+"src/Windows/Monitoring/MonitorSession.Registrations.cs","ShareFileWatch.MonitorSession.SetTargetRecursion(WatchItem item, bool? overrideValue)","SCT-GUI-020","Per-target recurrence overrides inherited defaults and rebaselines without phantom changes"
