@@ -5,7 +5,6 @@ namespace ShareFileWatch;
 /// @brief 設定ファイルと観測キャッシュを独立に読み書きする。
 internal sealed class StateStore(string file, string? database = null)
 {
-    private static readonly JsonSerializerOptions s_settingsFormat = new() { WriteIndented = true };
     private readonly string __backup = file + ".bak";
     private readonly string __temporary = file + ".tmp";
     private readonly string __database = database ?? Path.ChangeExtension(file, ".sqlite3");
@@ -87,7 +86,7 @@ internal sealed class StateStore(string file, string? database = null)
     private static AppState ReadSettings(string path)
     {
         using var stream = File.OpenRead(path);
-        var data = JsonSerializer.Deserialize<AppState>(stream) ?? throw new JsonException();
+        var data = JsonSerializer.Deserialize(stream, SettingsJsonContext.Default.AppState) ?? throw new JsonException();
         if (data.Version != 1) throw new NotSupportedException("この設定ファイルのバージョンには対応していません。");
         if (data.Items is null || data.Items.Any(i => i is null || i.Id == Guid.Empty || string.IsNullOrWhiteSpace(i.Path)) ||
             data.Items.Select(i => i.Id).Distinct().Count() != data.Items.Count)
@@ -153,7 +152,7 @@ internal sealed class StateStore(string file, string? database = null)
         SaveCache(state);
     }
 
-    private string SerializeSettings(AppState state) => JsonSerializer.Serialize(state, s_settingsFormat);
+    private string SerializeSettings(AppState state) => JsonSerializer.Serialize(state, SettingsJsonContext.Default.AppState);
 
     private void WriteSettings(string settings)
     {

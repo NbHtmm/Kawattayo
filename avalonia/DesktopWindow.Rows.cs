@@ -1,0 +1,228 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
+
+namespace ShareFileWatch;
+
+internal sealed partial class DesktopWindow
+{
+    private static Row[] Selected(ListBox list) => list.SelectedItems?.OfType<Row>().ToArray() ?? [];
+    private static string Label(WatchItem item) => string.IsNullOrWhiteSpace(item.DisplayName)
+        ? Leaf(item.Path) : item.DisplayName;
+    private static string Leaf(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } name ? name : path;
+    private static string Age(DateTimeOffset? at)
+    {
+        if (at is null) return "—";
+        var d = DateTimeOffset.Now - at.Value;
+        if (d < TimeSpan.FromMinutes(1)) return "たった今";
+        if (d < TimeSpan.FromHours(1)) return $"{(int)d.TotalMinutes}分前";
+        if (d < TimeSpan.FromDays(1)) return $"{(int)d.TotalHours}時間前";
+        return $"{at:MM/dd HH:mm}";
+    }
+
+    private Control BuildRow(Row row, ListBox source)
+    {
+        var line = new Grid { ColumnDefinitions = new(source == __targets ? "*,Auto,Auto" : "*,Auto"), MinHeight = 27 };
+        var name = new DockPanel { Margin = new Thickness(row.Depth * 15, 0, 8, 0) };
+        if (row.Branch is not null)
+        {
+            var toggle = Button(row.Expanded ? "▾" : "▸", () => Toggle(row.Branch));
+            toggle.MinWidth = 23; toggle.Padding = new Thickness(2, 0); toggle.Focusable = false;
+            Automation.SetLabel(toggle, row.Expanded ? "折りたたむ" : "展開する");
+            DockPanel.SetDock(toggle, Dock.Left); name.Children.Add(toggle);
+        }
+        var icon = new TextBlock { Text = row.Folder ? "📁" : "📄", Margin = new Thickness(2, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center };
+        DockPanel.SetDock(icon, Dock.Left); name.Children.Add(icon);
+        var text = new TextBlock { Text = row.Name, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        name.Children.Add(text); line.Children.Add(name);
+
+        var columns = new TextBlock { Text = row.Detail, Width = source == __targets ? 178 : 145,
+            TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        ToolTip.SetTip(columns, row.Detail);
+        if (source == __targets)
+        {
+            var count = new TextBlock { Text = row.Count?.ToString("N0") ?? "—", Width = 72,
+                TextAlignment = TextAlignment.Right, Padding = new Thickness(0, 0, 12, 0),
+                VerticalAlignment = VerticalAlignment.Center };
+            ToolTip.SetTip(count, $"対象ファイル数：{count.Text}");
+            Grid.SetColumn(count, 1);
+            line.Children.Add(count);
+        }
+        Grid.SetColumn(columns, source == __targets ? 2 : 1);
+        line.Children.Add(columns);
+        ToolTip.SetTip(name, $"{row.Name}\n{row.Path}\n{row.Detail}");
+        line.ContextMenu = BuildRowMenu(row, source);
+        line.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(line).Properties.IsRightButtonPressed && !Selected(source).Any(r => r.Key == row.Key))
+                source.SelectedItem = row;
+        };
+        return line;
+    }
+
+    private static class Automation
+    {
+        internal static void SetLabel(Control control, string name) => Avalonia.Automation.AutomationProperties.SetName(control, name);
+    }
+
+    private ContextMenu BuildRowMenu(Row row, ListBox list)
+    {
+        var menu = new ContextMenu();
+        void Add(string label, Action act)
+        {
+            var item = new MenuItem { Header = label };
+            item.Click += (_, _) => act();
+            menu.Items.Add(item);
+        }
+        Row[] SelectionOrRow() => Selected(list) is { Length: > 0 } selected && selected.Any(x => x.Key == row.Key) ? selected : [row];
+        Add("開く", () => _ = OpenRow(row, false));
+        if (!row.Folder) Add("親フォルダを開く", () => _ = OpenRow(row, true));
+        Add("パスをコピー", () => _ = Copy(SelectionOrRow(), true));
+        Add("コピー", () => _ = Copy(SelectionOrRow(), false));
+        if (row.Target is { } target)
+        {
+            Add("確認済みにする", () => Acknowledge(SelectionOrRow()));
+            if (row.Root)
+            {
+                Add("表示名を変更", () => _ = Rename(target));
+                if (target.IsFolder)
+                {
+                    Add("再帰監視：オン", () => SetRecursive(target, true));
+                    Add("再帰監視：オフ", () => SetRecursive(target, false));
+                    Add("再帰監視：既定に戻す", () => SetRecursive(target, null));
+                }
+                Add("登録解除", () => Remove(SelectionOrRow().Where(r => r.Root).Select(r => r.Target).OfType<WatchItem>()));
+            }
+        }
+        return menu;
+    }
+
+    private void RefreshTargets()
+    {
+        var rows = __state.Items.Select(item =>
+        {
+            int? count = item.IsFolder ? item.Inventory?.Count :
+                FileExclusions.Matches(item.Path, __state.ExcludedFilePatterns) ? 0 :
+                item.Baseline is null ? null : item.Baseline == ProbeState.Found ? 1 : 0;
+            var state = item.Error is not null ? "監視失敗" : count is null ? "未照会" : count == 0 ? "対象なし" : "正常";
+            var scope = !item.IsFolder ? "ファイル" : item.Recursive ? "再帰" : "直下";
+            var elapsed = item.QueryStart is long start ? $"照会中 {(Environment.TickCount64 - start) / 1000.0:0.0}秒" : item.QueryMs is { } ms ? $"{ms / 1000.0:0.###}秒" : "—";
+            return new Row(item.Id.ToString(), item, Label(item),
+                 $"{Age(item.LatestFileWriteAt)}  ｜  {scope}  ｜  {state}  ｜  {elapsed}{(item.Error is null ? "" : "：" + item.Error)}",
+                item.LatestFileWriteAt, count, item.Path, Folder: item.IsFolder, Root: true);
+        });
+        Assign(__targets, Order(rows, __targetSort, __targetReverse));
+    }
+
+    private void RefreshHistory()
+    {
+        var filter = __filter.Text?.Trim() ?? "";
+        var rows = __state.History
+            .Where(x => filter.Length == 0 || x.Path.Contains(filter, StringComparison.OrdinalIgnoreCase) || x.Kind.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .Select((x, i) => new Row(i.ToString(), null, Leaf(x.Path), $"{x.Kind}  ｜  {x.At:MM/dd HH:mm:ss}", x.At, Path: x.Path));
+        Assign(__history, Order(rows, __historySort, __historyReverse));
+    }
+
+    private void RefreshInbox()
+    {
+        var roots = __state.Items.Where(x => x.Unread > 0)
+            .Select(x => new Row(x.Id.ToString(), x, Label(x), $"{x.Unread:N0} 件  ｜  {Age(x.LastChanged)}",
+                x.LastChanged, x.Unread, x.Path, Folder: x.IsFolder, Root: true));
+        var rows = new List<Row>();
+        foreach (var root in Order(roots, __inboxSort, __inboxReverse))
+        {
+            var target = root.Target!;
+            bool branches = target.IsFolder && target.PendingFiles.Keys.Any(key => key != ".");
+            bool open = __expanded.Contains(root.Key);
+            rows.Add(root with { Branch = branches ? root.Key : null, Expanded = open });
+            if (!branches || !open) continue;
+            var children = target.PendingFiles.Values.Where(c => c.Relative != ".");
+            AddChildren(rows, target, root.Key, "", 1, children);
+        }
+        Assign(__inbox, rows);
+    }
+
+    private void AddChildren(List<Row> rows, WatchItem target, string root, string prefix, int depth, IEnumerable<FileChange> changes)
+    {
+        var groups = new Dictionary<string, List<FileChange>>(StringComparer.OrdinalIgnoreCase);
+        var siblings = new List<Row>();
+        foreach (var change in changes)
+        {
+            var rest = change.Relative.AsSpan(prefix.Length);
+            int slash = rest.IndexOfAny('\\', '/');
+            if (slash < 0)
+            {
+                string path = Path.Combine(target.Path, change.Relative);
+                siblings.Add(new(root + "|" + change.Relative, target, rest.ToString(), $"{change.Kind}  ｜  {Age(change.DetectedAt)}",
+                    change.DetectedAt, change.Count, path, change, Depth: depth));
+                continue;
+            }
+            string name = rest[..slash].ToString();
+            if (!groups.TryGetValue(name, out var group)) groups[name] = group = [];
+            group.Add(change);
+        }
+        foreach (var (name, group) in groups)
+        {
+            var relative = prefix + name;
+            var branch = root + "|" + relative + "\\";
+            var time = group.Max(x => x.DetectedAt);
+            siblings.Add(new(branch, target, name, $"{group.Count:N0} ファイル  ｜  {Age(time)}", time,
+                group.Count, Path.Combine(target.Path, relative), Folder: true, Depth: depth, Branch: branch,
+                Expanded: __expanded.Contains(branch)));
+        }
+        foreach (var row in Order(siblings, __inboxSort, __inboxReverse))
+        {
+            rows.Add(row);
+            if (row.Expanded) AddChildren(rows, target, root, prefix + row.Name + "\\", depth + 1, groups[row.Name]);
+        }
+    }
+
+    private static IEnumerable<Row> Order(IEnumerable<Row> rows, int column, bool reverse) => column switch
+    {
+        1 => reverse ? rows.OrderByDescending(x => x.At) : rows.OrderBy(x => x.At),
+        2 => reverse ? rows.OrderByDescending(x => x.Count) : rows.OrderBy(x => x.Count),
+        _ => reverse ? rows.OrderByDescending(x => x.Name, StringComparer.CurrentCultureIgnoreCase)
+            : rows.OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase)
+    };
+
+    private static void Assign(ListBox list, IEnumerable<Row> rows)
+    {
+        var next = rows.ToArray();
+        if (list.ItemsSource is Row[] old && old.SequenceEqual(next)) return;
+        var selected = Selected(list).Select(x => x.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        list.ItemsSource = next;
+        foreach (var row in next.Where(x => selected.Contains(x.Key))) list.SelectedItems?.Add(row);
+    }
+
+    private void Toggle(string branch)
+    {
+        if (!__expanded.Add(branch)) __expanded.Remove(branch);
+        RefreshInbox();
+    }
+
+    private void ExpandAll()
+    {
+        foreach (var item in __state.Items.Where(i => i.Unread > 0 && i.IsFolder))
+        {
+            string root = item.Id.ToString();
+            __expanded.Add(root);
+            foreach (var key in item.PendingFiles.Keys)
+                for (int i = key.IndexOf('\\'); i >= 0; i = key.IndexOf('\\', i + 1))
+                    __expanded.Add(root + "|" + key[..(i + 1)]);
+        }
+        RefreshInbox();
+    }
+
+    private void Sort(ListBox list, int column)
+    {
+        static void Set(ref int prior, ref bool reverse, int next)
+        { reverse = prior == next ? !reverse : next == 1; prior = next; }
+        if (list == __targets) { Set(ref __targetSort, ref __targetReverse, column); RefreshTargets(); }
+        else if (list == __history) { Set(ref __historySort, ref __historyReverse, column); RefreshHistory(); }
+        else { Set(ref __inboxSort, ref __inboxReverse, column); RefreshInbox(); }
+    }
+}

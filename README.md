@@ -2,6 +2,8 @@
 
 Windows x64 用の共有ファイル・フォルダ更新モニターです。ファイル本体を読み取らず、日時やサイズを巡回比較して通知します。操作方法は `使い方.txt` を参照してください。
 
+Avalonia 版（Native AOT / Windows x64）については [Avalonia 版の使い方](avalonia/README.md) を参照してください。
+
 ## 開発と検証
 
 開発 PC に .NET 10 SDK と win-x64 の発行用パックを用意し、`tool\build.bat` を実行します。外部パッケージの自動ダウンロードはしません。配布先では `bin\かわったよ.exe` 単体で動作します。
