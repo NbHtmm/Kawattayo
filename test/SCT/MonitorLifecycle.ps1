@@ -27,6 +27,7 @@ function Invoke-SctMonitorLifecycle([string]$Package, [string]$Work, [string]$Mo
         switch ($Mode) {
             'FolderOffline' { Test-SctLocalFolderOffline $p $view $root $file $evidence }
             'Exclusions' { Test-SctFolderExclusions $p $view $root $evidence }
+            'History' { Test-SctHistory $p $view $root $evidence }
             'FileLifecycle' { Test-SctFileLifecycle $p $view $file $evidence }
             default { throw "Unknown GUI scenario: $Mode." }
         }
