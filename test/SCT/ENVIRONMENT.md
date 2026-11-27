@@ -19,3 +19,12 @@
 | SCT-SMB-003 | 専用のUNC共有に到達可能・権限不足のフォルダと、日本語名・想定上限内の長いパスを用意する。実際に存在しない対象とも比較する。 | 通常の対象は照会でき、権限不足は確認不能として表示し、到達可能だが存在しない対象と混同しない。対象パスと判定を記録する。 |
 | SCT-PERF-001 | 専用PCでファイル件数・階層・保存位置・許容応答時間を事前に記録し、段階的に増やす。監視中に設定を開き、中断・再開する。 | 設定表示と中断が事前の目標時間内。再開後の件数は用意した一覧と一致し、履歴欠落がない。経過時間・件数・対象PCの条件を残す。 |
 | SCT-DPI-001 | 使い捨てセッションで4Kと異なる倍率の画面を用意し、画面間の移動・最小幅への縮小・文字サイズ変更を行う。 | ファイル名、フォルダ種別、展開・既読の操作が確認でき、クリック対象がずれず、必要時にスクロールできる。解像度・倍率別の画面を保存する。 |
+
+## SCT-SMB-002 の補助スクリプト
+
+`Run-SmbLifecycle.ps1` は自動SCTとは別に起動する。2台の検証用Windows端末が同じ**試験専用**共有にアクセスできることを先に確認し、`\\SERVER\SHARE\Kawattayo-Sct` を空で用意する。通常のアプリは開いていない専用セッションを使う。既存のアプリを終了させたり共有設定を変更したりする機能はない。PowerShell 7を使い、両端末に同じ試験コードを置く。
+
+1. 両端末に同じ新しい実行ID（`[guid]::NewGuid()`）を用意する。端末Aで `pwsh -File test/SCT/Run-SmbLifecycle.ps1 -Role Monitor -FixtureRoot "\\SERVER\SHARE\Kawattayo-Sct" -RunId "<同じID>" -Package "<配布ZIP>" -DedicatedShare`。
+2. Aに `Fixture is ready for Writer` が出たら45秒以内に、Bで `pwsh -File test/SCT/Run-SmbLifecycle.ps1 -Role Writer -FixtureRoot "\\SERVER\SHARE\Kawattayo-Sct" -RunId "<同じID>" -DedicatedShare`。2台はそれぞれ固有のコンピューター名を使用する。
+3. AがBの排他書き込み中に監視を1回終え、Bが書き込みを完了できることを確認する。続いてBがファイルを改名、元の名前に戻す、削除を行い、Aで「更新」「消失」「出現」「消失」が順に各1件だけ検知されることを確認する。結果はAの `build/SMB-002-*/environment-result.json` に別保存する。A・Bのコンソールログも残す。
+4. `-LocalRehearsal` は同一端末のリポジトリ内 `build/` 配下の使い捨てフォルダで手順を予行するモード。成功しても `REHEARSAL_PASS` で、実SMBの合格には含めない。試験用の共有側フォルダは自動で削除しない。
