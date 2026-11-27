@@ -18,3 +18,4 @@ source,signature,case_ids,scope
 "src/Windows/Monitoring/MonitorSession.Registrations.cs","ShareFileWatch.MonitorSession.RemoveTargets(IEnumerable<WatchItem> targets)","SCT-GUI-018","Remove one ID and preserve other unread, history, and both files"
 "src/Windows/Monitoring/MonitorSession.Registrations.cs","ShareFileWatch.MonitorSession.SetTargetRecursion(WatchItem item, bool? overrideValue)","SCT-GUI-020","Per-target recurrence overrides inherited defaults and rebaselines without phantom changes"
 "avalonia/Watch/DesktopWindow.Actions.cs","ShareFileWatch.DesktopWindow.CaptureAcknowledgement(Row row)","SCT-GUI-021","Acknowledgment identifies the exact nested leaf when two different entries share a basename"
+"src/Windows/Monitoring/MonitorSession.Registrations.cs","ShareFileWatch.MonitorSession.ClearDeleted()","SCT-GUI-022","Clear individual and folder-child disappearing notifications while retaining other unread rows and all history"
