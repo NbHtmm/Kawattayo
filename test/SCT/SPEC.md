@@ -4,7 +4,7 @@ SCTは、**利用者が配布版で目的を達成できるか**を確かめる�
 
 ## ケース一覧
 
-[全ケースの台帳](CASES.md) に未実装・要環境項目も掲載。CLI-002〜006・008・009の詳細は [CheckpointSafety.feature](Features/CheckpointSafety.feature)。
+[全ケースの台帳](CASES.md) に未実装・要環境項目も掲載。CLI-002〜006・008〜010の詳細は [CheckpointSafety.feature](Features/CheckpointSafety.feature)。
 
 | ID | 利用者がしたいこと | 実施方法 |
 |---|---|---|
