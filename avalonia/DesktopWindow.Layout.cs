@@ -25,7 +25,7 @@ internal sealed partial class DesktopWindow
     {
         __pin = Button("", TogglePinned);
         var commands = Bar(Button("↻ 更新", () => _ = __monitor.Scan()), __pin,
-            Button("履歴", ShowHistory), Button("設定…", () => ShowSettings()));
+            Button("履歴", ShowHistory), Button("設定…", () => ShowSettings()), BuildToolsMenu());
         commands.HorizontalAlignment = HorizontalAlignment.Right;
         __summary.VerticalAlignment = VerticalAlignment.Center;
         var header = new DockPanel { LastChildFill = true };
@@ -149,10 +149,20 @@ internal sealed partial class DesktopWindow
         Hide();
     }
 
+    private Control BuildToolsMenu()
+    {
+        var item = new MenuItem { Header = "差分収集…" };
+        item.Click += (_, _) => ShowCollector();
+        var button = new Button { Content = "ツール ▾", ContextMenu = new ContextMenu { Items = { item } } };
+        button.Click += (_, _) => button.ContextMenu!.Open(button);
+        return button;
+    }
+
     private void CloseChildWindows()
     {
         __settingsWindow?.Close();
         __historyWindow?.Close();
+        collector?.Close();
     }
 
     private Control BuildTargetToolbar()

@@ -12,7 +12,7 @@ internal sealed partial class MonitorSession
     // Shared by all roots, UI thread only. Never wait for a slow share before checkpointing.
     private readonly DispatcherTimer __scanFlush = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private bool __rowsPending, __inboxPending, __scanNeedsSave;
-    private readonly List<string> __alertsPending = [];
+    private readonly List<MonitorAlert> __alertsPending = [];
 #if KAWATTAYO_SMOKE
     internal Action? BeforeApplyForTest { get; set; }
 #endif
@@ -238,7 +238,7 @@ internal sealed partial class MonitorSession
         }
 
         var pending = __state.RenotifyUnread ? null : new Lazy<PendingPathLookup>(() => new(__state.Items));
-        var alerts = new List<string>();
+        var alerts = new List<MonitorAlert>();
         bool changed = false;
         var baselineBefore = item.Baseline;
         var inventoryBefore = item.Inventory;
@@ -278,7 +278,7 @@ internal sealed partial class MonitorSession
 
     /// @brief 同じ巡回で重複したパスを除き、履歴と初回の未読通知に反映する。
     private void RecordDetectedChange(string path, string kind, DateTimeOffset detectedAt,
-        PendingPathLookup? previouslyUnread, HashSet<string> detected, List<string> alerts)
+        PendingPathLookup? previouslyUnread, HashSet<string> detected, List<MonitorAlert> alerts)
     {
         // 同一巡回で重複して検知したパスを履歴や通知に二重計上しない。
         if (!detected.Add(path))
@@ -289,7 +289,7 @@ internal sealed partial class MonitorSession
         // 再通知を抑止する設定でも、未読・履歴の記録自体は省略しない。
         if (previouslyUnread?.Contains(path) != true)
         {
-            alerts.Add($"{DisplayName(path)}：{kind}");
+            alerts.Add(new(path, $"{DisplayName(path)}：{kind}"));
         }
 
         __state.History.Enqueue(new(detectedAt, path, kind));

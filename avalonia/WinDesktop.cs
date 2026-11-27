@@ -9,18 +9,22 @@ internal sealed class WinDesktop : IDisposable
     private const uint IconFlags = 0x01 | 0x02 | 0x04;
     private const uint IconId = 1;
     private readonly Window window;
-    private readonly Action show, scan, quit;
+    private readonly Action show, scan, quit, collector;
+    private readonly Action<string?> openNotification;
+    private string? notifiedPath;
     private nint handle, icon;
     private uint taskbarCreated;
     private bool active;
     internal bool IsVisible => active;
 
-    internal WinDesktop(Window window, Action show, Action scan, Action quit)
+    internal WinDesktop(Window window, Action show, Action scan, Action quit, Action collector, Action<string?> openNotification)
     {
         this.window = window;
         this.show = show;
         this.scan = scan;
         this.quit = quit;
+        this.collector = collector;
+        this.openNotification = openNotification;
     }
 
     internal void Attach()
@@ -41,15 +45,15 @@ internal sealed class WinDesktop : IDisposable
         else { ShellNotifyIcon(2, ref info); active = false; }
     }
 
-    internal void Notify(IReadOnlyList<string> alerts)
+    internal void Notify(IReadOnlyList<MonitorAlert> alerts)
     {
         if (!active) { MessageBeep(0x40); return; }
         var info = CreateInfo(0x10);
         info.Title = $"かわったよ ｜ {alerts.Count} 件の変更";
-        var details = string.Join(Environment.NewLine, alerts.Take(3));
+        var details = string.Join(Environment.NewLine, alerts.Take(3).Select(x => x.Label));
         info.Info = details.Length < 255 ? details : details[..252] + "…";
         info.InfoFlags = 1;
-        ShellNotifyIcon(1, ref info);
+        if (ShellNotifyIcon(1, ref info)) notifiedPath = alerts.FirstOrDefault()?.Path;
     }
 
     private nint OnMessage(nint hwnd, uint msg, nint wParam, nint lParam, ref bool handled)
@@ -66,6 +70,7 @@ internal sealed class WinDesktop : IDisposable
         switch ((int)lParam)
         {
             case 0x0203: show(); break; // ダブルクリックで画面を戻す
+            case 0x0405: openNotification(notifiedPath); break; // NIN_BALLOONUSERCLICK
             case 0x0205: ShowMenu(); break;
         }
         return 0;
@@ -79,6 +84,7 @@ internal sealed class WinDesktop : IDisposable
         {
             AppendMenu(menu, 0, 1, "かわったよを開く");
             AppendMenu(menu, 0, 2, "今すぐ照会");
+            AppendMenu(menu, 0, 4, "差分収集");
             AppendMenu(menu, 0, 3, "終了");
             GetCursorPos(out var point);
             SetForegroundWindow(handle);
@@ -87,6 +93,7 @@ internal sealed class WinDesktop : IDisposable
             if (action == 1) show();
             if (action == 2) scan();
             if (action == 3) quit();
+            if (action == 4) collector();
         }
         finally { DestroyMenu(menu); }
     }

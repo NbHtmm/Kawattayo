@@ -91,7 +91,11 @@ internal sealed partial class DesktopWindow
                 var json = File.ReadAllText(Path.Combine(fixture, AppDefaults.SettingsFileName));
                 Require(!json.Contains("PendingFiles") && !json.Contains("History") && !json.Contains("Inventory"), "設定専用JSON");
                 await CapturePreviewScreens(fixture);
-                File.WriteAllText(report, "PASS: Avalonia window, scan, stale result suppression, save retry, large unread lookup and SQLite restart.");
+                CheckpointTests.Run(fixture);
+                ShowCollector();
+                if (collector?.IsVisible != true || !IsVisible) throw new InvalidOperationException("Independent collector did not open.");
+                collector.Close();
+                File.WriteAllText(report, "PASS: checkpoint, collector, Avalonia window, scan, stale result suppression, save retry, large unread lookup and SQLite restart.");
             }
             catch (Exception error) { File.WriteAllText(report, error.ToString()); }
             finally { __closed = true; CloseChildWindows(); Close(); }

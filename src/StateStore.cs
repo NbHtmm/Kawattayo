@@ -26,6 +26,8 @@ internal sealed class StateStore(string file, string? database = null)
         return paths;
     }
 
+    internal string StorageDirectory => Path.GetDirectoryName(__database) ?? AppContext.BaseDirectory;
+
     internal bool IsInternalFile(string path)
     {
         var name = Path.GetFullPath(path);

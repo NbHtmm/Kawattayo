@@ -2,6 +2,8 @@ using Avalonia.Threading;
 
 namespace ShareFileWatch;
 
+internal sealed record MonitorAlert(string Path, string Label);
+
 // 巡回・表示への通知・保存要求を調整する。観測の反映はUIスレッドに限定する。
 internal sealed partial class MonitorSession
 {
@@ -26,7 +28,7 @@ internal sealed partial class MonitorSession
     internal string? StartupWarning { get; }
     internal event Action<bool>? RowsChanged;
     internal event Action? ProgressChanged;
-    internal event Action<IReadOnlyList<string>>? Alerts;
+    internal event Action<IReadOnlyList<MonitorAlert>>? Alerts;
     private bool IsScanning => __activeScanRoots.Count > 0;
     internal string Status => __writer.Error is string error ? "保存に失敗：" + error :
         __pollError ?? (__state.Paused ? "一時停止中" : IsScanning ? $"照会中 {__activeScanRoots.Count}系統" :

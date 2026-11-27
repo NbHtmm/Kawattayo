@@ -41,7 +41,7 @@ internal sealed partial class DesktopWindow : Window
     {
         __monitor = monitor;
         __state = monitor.State;
-        __native = new(this, ShowFromTray, () => _ = __monitor.Scan(), RequestExit);
+        __native = new(this, ShowFromTray, () => _ = __monitor.Scan(), RequestExit, ShowCollector, OpenNotification);
         Title = AppDefaults.WindowTitle + " · Avalonia";
         Width = 850;
         Height = 560;
@@ -92,7 +92,7 @@ internal sealed partial class DesktopWindow : Window
             if (__closed) return;
             e.Cancel = true;
             if (__closing) return;
-            if (__native.IsVisible) { HideToTray(); return; }
+            if (__native.IsVisible || collector?.IsVisible == true) { HideToTray(); return; }
             Dispatcher.UIThread.Post(async () => await CloseFully());
         };
         Closed += (_, _) => __native.Dispose();
