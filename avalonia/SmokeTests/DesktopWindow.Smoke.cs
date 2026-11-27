@@ -60,6 +60,8 @@ internal sealed partial class DesktopWindow
                 Require(!__detailsBox.IsVisible, "詳細は初期状態で閉じている");
                 ExpandAll();
                 __inbox.SelectedIndex = __inbox.Items.Count - 1;
+                Require(__downloadButton is { IsEnabled: true } && Selected(__inbox).Any(CanDownload),
+                    "未読ファイル選択でダウンロードを有効にする");
                 details.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
                 Require(__detailsBox.IsVisible && __detailsBox.Text?.Contains(sample) == true, "詳細に選択項目のパスを表示");
                 details.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
@@ -99,6 +101,7 @@ internal sealed partial class DesktopWindow
                 CheckpointTests.Run(fixture);
                 await ReconciliationTests.Run(fixture);
                 await ReconciliationTests.VerifySettled(fixture);
+                UnreadDownloadTests.TestDownloads(Path.Combine(fixture, "unread-downloads"));
                 await HookTests.Run(fixture);
                 ShowCollector();
                 if (collector?.IsVisible != true || !IsVisible) throw new InvalidOperationException("Independent collector did not open.");

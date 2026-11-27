@@ -58,7 +58,7 @@ internal sealed partial class DesktopWindow : Window
         __targets.ItemTemplate = CreateRowTemplate(__targets);
         __history.ItemTemplate = CreateRowTemplate(__history);
         KeyDown += MainKeyboard;
-        __inbox.SelectionChanged += (_, _) => RefreshDetails();
+        __inbox.SelectionChanged += (_, _) => { RefreshDetails(); RefreshDownloadButton(); };
         foreach (var list in new[] { __inbox, __targets, __history })
         {
             list.KeyDown += Keyboard;
@@ -97,7 +97,7 @@ internal sealed partial class DesktopWindow : Window
             if (__native.IsVisible || collector?.IsVisible == true) { HideToTray(); return; }
             Dispatcher.UIThread.Post(async () => await CloseFully());
         };
-        Closed += (_, _) => __native.Dispose();
+        Closed += (_, _) => { __downloadStop?.Cancel(); __native.Dispose(); };
     }
 
     private nint Handle => TryGetPlatformHandle()?.Handle ?? 0;

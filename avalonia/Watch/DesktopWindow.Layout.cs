@@ -54,7 +54,13 @@ internal sealed partial class DesktopWindow
     private Control BuildInbox()
     {
         __detailsToggle = Button("詳細 ▾", ToggleDetails);
-        var actions = Bar(Button("すべて展開", ExpandAll), Button("すべて折りたたむ", CollapseAll),
+        __downloadButton = Button("ダウンロード…", () =>
+        {
+            if (__downloadStop is { } stop) stop.Cancel();
+            else _ = DownloadRows(Selected(__inbox), false);
+        });
+        RefreshDownloadButton();
+        var actions = Bar(__downloadButton, Button("すべて展開", ExpandAll), Button("すべて折りたたむ", CollapseAll),
             Button("消失通知を消す", __monitor.ClearDeleted), __detailsToggle);
         actions.HorizontalAlignment = HorizontalAlignment.Right;
         var lower = new StackPanel();

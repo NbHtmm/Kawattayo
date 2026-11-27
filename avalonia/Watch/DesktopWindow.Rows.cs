@@ -55,6 +55,10 @@ internal sealed partial class DesktopWindow
         if (!row.Folder) Add("親フォルダを開く", () => _ = OpenRow(row, true));
         Add("パスをコピー", () => _ = Copy(SelectionOrRow(), true));
         Add("コピー", () => _ = Copy(SelectionOrRow(), false));
+        if (list == __inbox && SelectionOrRow().Any(CanDownload))
+            Add("ダウンロード…", () => _ = DownloadRows(SelectionOrRow(), false));
+        if (list == __inbox && CanDownload(row) && LocalDownloads.CanOpen(row.Path!))
+            Add("ダウンロードして開く…", () => _ = DownloadRows([row], true));
         if (row.Target is { } target)
         {
             Add("確認済みにする", () => Acknowledge(SelectionOrRow()));
