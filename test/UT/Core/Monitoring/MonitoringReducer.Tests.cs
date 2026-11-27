@@ -135,6 +135,65 @@ public sealed class MonitoringReducerTests
     }
 
 
+
+    [Fact]
+    public void Apply_IdenticalFolderScopeDoesNotRewriteTheInventoryButNewScopeDoes()
+    {
+        var at = DateTimeOffset.UnixEpoch.AddDays(1);
+        var root = Path.GetFullPath("scope-test");
+        var original = new Dictionary<string, Fingerprint>(StringComparer.OrdinalIgnoreCase)
+            { ["report.log"] = new(at.AddSeconds(-1).ToFileTime(), 1, 17) };
+        var target = new WatchItem { Path = root, IsFolder = true };
+        var state = new AppState { Items = [target] };
+
+        var first = Apply(original, ["*.tmp", "~$*"], at);
+        Assert.True(first.NeedsSave);
+        Assert.False(first.UnreadChanged);
+        Assert.Same(original, target.Inventory);
+        var copy = new Dictionary<string, Fingerprint>(original, StringComparer.OrdinalIgnoreCase);
+
+        var unchanged = Apply(copy, ["~$*", "*.TMP"], at.AddSeconds(1));
+        Assert.False(unchanged.NeedsSave);
+        Assert.Same(original, target.Inventory);
+        Assert.Equal(at.AddSeconds(1), target.LastChecked);
+
+        var scopeChanged = Apply(copy, ["*.tmp"], at.AddSeconds(2));
+        Assert.True(scopeChanged.NeedsSave);
+        Assert.False(scopeChanged.UnreadChanged);
+        Assert.Same(copy, target.Inventory);
+        Assert.Equal(new[] { "*.tmp" }, target.InventoryExclusions);
+        Assert.Empty(state.History);
+        Assert.Empty(scopeChanged.Alerts);
+
+        ObservationOutcome Apply(Dictionary<string, Fingerprint> files, string[] exclusions, DateTimeOffset when) =>
+            Assert.IsType<ObservationOutcome>(MonitoringReducer.Apply(state,
+                new(target.Id, target.Revision, null, new FolderResult(files) { Exclusions = exclusions }, when, null), [], true));
+    }
+
+    [Fact]
+    public void Apply_UnavailableFolderDoesNotRewriteItsLastCompleteBaseline()
+    {
+        var at = DateTimeOffset.UnixEpoch.AddDays(1);
+        var files = new Dictionary<string, Fingerprint>(StringComparer.OrdinalIgnoreCase)
+            { ["report.log"] = new(at.AddSeconds(-1).ToFileTime(), 1, 17) };
+        var root = Path.GetFullPath("transient-failure-test");
+        var target = new WatchItem { Path = root, IsFolder = true, Baseline = ProbeState.Found,
+            Inventory = files, DirectoryStamp = 10, LatestFileWriteAt = at.AddSeconds(-1), InventoryExclusions = ["*.tmp"] };
+        var state = new AppState { Items = [target] };
+        var unavailable = new WatchObservation(target.Id, target.Revision, null, new FolderResult(null, "share unavailable"), at, null);
+
+        var outcome = Assert.IsType<ObservationOutcome>(MonitoringReducer.Apply(state, unavailable, [], true));
+        Assert.False(outcome.NeedsSave);
+        Assert.False(outcome.UnreadChanged);
+        Assert.Empty(outcome.Alerts);
+        Assert.Empty(outcome.FileUpdates);
+        Assert.Equal("share unavailable", target.Error);
+        Assert.Equal(ProbeState.Found, target.Baseline);
+        Assert.Equal(10, target.DirectoryStamp);
+        Assert.Same(files, target.Inventory);
+        Assert.Empty(state.History);
+    }
+
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
