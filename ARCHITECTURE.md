@@ -30,6 +30,8 @@ GUIとCLIが同じC#ファイルを別々にコンパイルする方式をやめ
 
 ## 確認
 
+必須テストの選び方と完了基準は [テスト規約](TESTING.md) を参照。
+
 - `dotnet run --project tests/Core.Tests/Kawattayo.Core.Tests.csproj -c Release`：OSやDBを使わない監視・差分判定の回帰テスト。
 - `tool\test.bat`：上記に加え、Windows上でAvaloniaのスモークテストを実行。検証データは `build\` 内に分離する。
 - 配布経路を変更した場合、Native AOTのZIPと単体EXEも個別に起動する。CLaunch本体、実SMB、Windowsシェル通知は必要に応じて別途確認する。
