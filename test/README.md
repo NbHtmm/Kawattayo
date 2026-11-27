@@ -52,6 +52,8 @@ SCTは `--smoke` を使用せず、本番と同じEXEに対して、起動引数
 
 詳しくは [専用環境の実行手順](SCT/ENVIRONMENT.md)。`PREPARED_ONLY`、`INSPECTED_ONLY`、`REHEARSAL_PASS`、`BLOCKED` は合格件数に加えない。準備や予行で通っても、その環境での動作は未確認のまま。
 
+実環境に接続せず、補助スクリプトの構文と6件の準備モードだけをまとめて確認する場合は、`pwsh -File test/SCT/Check-EnvironmentHarnesses.ps1 -Package "<配布ZIP>"`。出力されたケースID・ZIPハッシュ・`PREPARED_ONLY` ラベルを照合する。アプリ起動・実通知・SMB接続・既定アプリ変更は行わず、本試験の合格件数には加えない。
+
 ## ツールの選定
 
 - 採用：[xUnit v3](https://xunit.net/docs/getting-started/v3/cmdline) と [.NET CLI/VSTest](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-vstest) でテストとTRX、[Coverlet](https://github.com/coverlet-coverage/coverlet) でカバレッジ。初期版はパッケージバージョンとロックを固定する。
