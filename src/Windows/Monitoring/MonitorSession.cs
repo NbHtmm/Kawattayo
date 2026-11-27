@@ -36,10 +36,19 @@ internal sealed partial class MonitorSession
     internal event Action<bool>? RowsChanged;
     internal event Action? ProgressChanged;
     internal event Action<IReadOnlyList<MonitorAlert>>? Alerts;
-    private bool IsScanning => __activeScanRoots.Count > 0;
-    internal string Status => __writer.Error is string error ? "保存に失敗：" + error :
-        __pollError ?? (__state.Paused ? "一時停止中" : IsScanning ? $"照会中 {__activeScanRoots.Count}系統" :
-            __state.Items.Count == 0 ? "監視対象を追加してください" : __lastPoll is { } at ? $"最終巡回 {at:HH:mm:ss}" : "監視中");
+    internal string Status =>
+        DescribeStatus(__writer.Error, __pollError, __state.Paused, __activeScanRoots.Count, __state.Items.Count, __lastPoll);
+
+    // 保護すべき保存エラーは、巡回中などの通常表示より優先する。
+    internal static string DescribeStatus(string? saveError, string? pollError, bool paused, int activeRoots, int registrations, DateTimeOffset? lastPoll)
+    {
+        if (saveError is not null) return "保存に失敗：" + saveError;
+        if (pollError is not null) return pollError;
+        if (paused) return "一時停止中";
+        if (activeRoots > 0) return $"照会中 {activeRoots}系統";
+        if (registrations == 0) return "監視対象を追加してください";
+        return lastPoll is { } at ? $"最終巡回 {at:HH:mm:ss}" : "監視中";
+    }
 
     private void UpdateStatus() => ProgressChanged?.Invoke();
 
