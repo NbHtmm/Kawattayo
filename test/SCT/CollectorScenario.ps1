@@ -76,5 +76,5 @@ function Select-SctCollectorPreview($View) {
 function Submit-SctCollectorDestination($Process,$View,[string]$Destination) {
     Invoke-SctUiButton $View '選択分をダウンロード…'
     $picker = Wait-SctUi 'collector output folder picker' { Get-SctOwnedWindow $Process.Id '保存先を選択' }
-    Submit-SctFolderPicker $picker $Process.Id $Destination
+    Submit-SctNativePicker $picker $Process.Id $Destination
 }

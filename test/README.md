@@ -2,7 +2,7 @@
 
 | コマンド | 実行対象 | 結果 |
 |---|---|---|
-| `test\run_ut.bat` | コアを参照する xUnit テスト。実ファイル・SQLite・GUIは使わない | `build/UT-*/result.trx`、Coverlet の Cobertura/OpenCover、`source-map.csv`、`functions.csv` |
+| `test\run_ut.bat` | Core・Windows・Avalonia・CLIの判定を確認するxUnitテスト。実ファイル・SQLite・GUIは使わない | `build/UT-*/result.trx`、Coverlet の Cobertura/OpenCover、`source-map.csv`、`functions.csv` |
 | `test\run_sct.bat` | 現在のソースから配布用Native AOT ZIPを新規作成し、展開したEXEを外から実行 | `build/SCT-*/result.json`、CLIの標準出力・標準エラー、ZIPのSHA-256 |
 | `test\run_sct.bat "配布用ZIPのパス"` | 指定したZIP。再ビルドしないので、別の人も同一の配布物を試験できる | 同上 |
 | `tool\test.bat integration` | 既存のAvalonia内部結合テスト。テスト専用ビルドを起動 | 従来のログ。配布EXEを検証するSCTとは別 |
@@ -36,4 +36,4 @@ SCTは `--smoke` を使用せず、本番と同じEXEに対して、起動引数
 - 次段階：[Roslyn](https://learn.microsoft.com/en-us/dotnet/csharp/roslyn-sdk/get-started/semantic-analysis) で関数の対応漏れを検査。[ReportGenerator](https://github.com/danielpalme/ReportGenerator) は結果をHTMLで見たい場合に追加。[FlaUI](https://github.com/FlaUI/FlaUI) は配布EXEのGUI操作を増やす段階で導入する。
 - [Avalonia Headless](https://docs.avaloniaui.net/docs/testing/setting-up-the-headless-platform) は画面ロジックの補助テスト用。実行ファイルをWindows上で操作するSCTの代わりにはしない。
 
-現在の範囲はUT（[対象範囲](COVERAGE.md)）と、配布版のGUI起動・CLIの作成／差分／保存のSCT 2ケース。関数台帳と全関数へのテスト追加、FlaUIによる操作の自動化は未導入。
+実装範囲は[試験範囲一覧](COVERAGE.md)と[SCTケース台帳](SCT/CASES.md)を参照する。SCTの台帳は実装状況、実際の合否は実行結果を示す。

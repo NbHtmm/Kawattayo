@@ -20,7 +20,7 @@ function Test-SctBulkDownload($Process,$Monitor,[string]$Work,[string[]]$Sources
     $picker = Wait-SctUi 'native folder picker' {
         Get-SctOwnedWindow $Process.Id 'ローカルの保存先を選択'
     }
-    Submit-SctFolderPicker $picker $Process.Id $destination
+    Submit-SctNativePicker $picker $Process.Id $destination
     # The shell may first navigate to a typed folder instead of returning it.
     # Only confirm a second time after the address bar proves we are inside the fixture.
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -31,7 +31,7 @@ function Test-SctBulkDownload($Process,$Monitor,[string]$Work,[string[]]$Sources
             $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty,'1001')
             $address = $current.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
             if ($address -and $address.Current.Name.EndsWith($destination,[StringComparison]::OrdinalIgnoreCase)) {
-                Submit-SctFolderPicker $current $Process.Id $destination
+                Submit-SctNativePicker $current $Process.Id $destination
                 break
             }
         }
@@ -80,7 +80,7 @@ function Get-SctDownloadSelection($Window,[string]$Label) {
     throw "SelectionItem pattern not available for $Label."
 }
 
-function Submit-SctFolderPicker($Picker,[int]$ProcessId,[string]$Path) {
+function Submit-SctNativePicker($Picker,[int]$ProcessId,[string]$Path,[switch]$FilePicker) {
     if (!('SctFolderPickerNative' -as [type])) {
         Add-Type -TypeDefinition @"
 using System;
@@ -97,26 +97,38 @@ public static class SctFolderPickerNative
     private static bool Validate(IntPtr h, int expected, string type)
     {
         var name = new StringBuilder(64);
-        GetWindowThreadProcessId(h, out int pid);
+        int pid;
+        GetWindowThreadProcessId(h, out pid);
         GetClassName(h, name, name.Capacity);
         return pid == expected && name.ToString().Equals(type, StringComparison.OrdinalIgnoreCase);
     }
-    public static string Submit(IntPtr dialog, int process, string folder)
+    public static string Submit(IntPtr dialog, int process, string path, bool filePicker)
     {
-        if (!Validate(dialog, process, "#32770")) return "unexpected folder dialog";
-        IntPtr edit = GetDlgItem(dialog, 1152), submit = GetDlgItem(dialog, 1);
-        if (!Validate(edit, process, "Edit") || !Validate(submit, process, "Button")) return "unexpected folder dialog children";
+        if (!Validate(dialog, process, "#32770")) return "unexpected native picker";
+        IntPtr submit = GetDlgItem(dialog, 1);
+        IntPtr edit;
+        if (filePicker)
+        {
+            // The file name field is nested: combo-box extension, combo box, then edit.
+            var outer = GetDlgItem(dialog, 1148);
+            if (!Validate(outer, process, "ComboBoxEx32")) return "missing file name control";
+            var combo = GetDlgItem(outer, 1148);
+            if (!Validate(combo, process, "ComboBox")) return "unexpected file name control";
+            edit = GetDlgItem(combo, 1148);
+        }
+        else edit = GetDlgItem(dialog, 1152);
+        if (!Validate(edit, process, "Edit") || !Validate(submit, process, "Button")) return "unexpected picker children";
         // The native picker does not always expose Value/Invoke providers to UI Automation.
         IntPtr result;
-        if (SendMessageTimeout(edit, 0x000C, IntPtr.Zero, folder, 2, 3000, out result) == IntPtr.Zero || result == IntPtr.Zero)
-            return "folder field rejected the path";
-        return PostMessage(submit, 0x00F5, IntPtr.Zero, IntPtr.Zero) ? null : "folder confirmation failed";
+        if (SendMessageTimeout(edit, 0x000C, IntPtr.Zero, path, 2, 3000, out result) == IntPtr.Zero || result == IntPtr.Zero)
+            return "picker field rejected the path";
+        return PostMessage(submit, 0x00F5, IntPtr.Zero, IntPtr.Zero) ? null : "picker confirmation failed";
     }
 }
 "@
     }
-    $errorText = [SctFolderPickerNative]::Submit([IntPtr]$Picker.Current.NativeWindowHandle,$ProcessId,$Path)
-    if ($errorText) { throw "Could not submit the isolated fixture folder: $errorText." }
+    $errorText = [SctFolderPickerNative]::Submit([IntPtr]$Picker.Current.NativeWindowHandle,$ProcessId,$Path,$FilePicker.IsPresent)
+    if ($errorText) { throw "Could not submit the isolated fixture path: $errorText." }
 }
 
 function Assert-SctDownloadDetails($Dialog,[string]$Rejected,[string]$Saved) {
