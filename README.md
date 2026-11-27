@@ -1,31 +1,7 @@
 # かわったよ
 
-Windows x64 用の共有ファイル・フォルダ更新モニターです。ファイル本体を読み取らず、日時やサイズを巡回比較して通知します。操作方法は `使い方.txt` を参照してください。
+共有ファイル・フォルダの更新を通知する Windows x64 アプリです。このブランチの開発・配布対象は Avalonia 版です。
 
-Avalonia 版（Native AOT / Windows x64）については [Avalonia 版の使い方](avalonia/README.md) を参照してください。
-
-## 開発と検証
-
-開発 PC に .NET 10 SDK と win-x64 の発行用パックを用意し、`tool\build.bat` を実行します。外部パッケージの自動ダウンロードはしません。配布先では `bin\かわったよ.exe` 単体で動作します。
-
-テストでは通常の設定を使いません。コマンドプロンプトで次を実行し、終了コードとレポートを確認してください。SMB テストにはローカルのループバック共有へのアクセスが必要です。
-
-```bat
-tests\run.bat
-```
-
-## GitHub Releases 用 ZIP
-
-テストコードと実行バッチは `tests\`、レポート・画面画像・テスト専用 exe は `build\tests\` に分離しています。配布版には自己テストを組み込みません。
-
-Windows の PowerShell で `.\tool\package.ps1` を実行すると、ビルドから `build\Kawattayo_win_x64.zip` の作成まで行います。ZIP には実行ファイル、使い方、プロジェクトの MIT ライセンス、同梱した .NET ランタイムパックのライセンスと通知（パック提供分）だけが入ります。設定・履歴・レポートは含めません。このコマンドは GitHub にアップロードしません。
-
-## プライバシーとライセンス
-
-設定は exe 横の `settings.json`（監視間隔・UI・除外ルール・登録した監視先など）だけに保存します。実際に照会したファイル名・前回の比較情報・未読/既読・変更履歴は Windows 内蔵 SQLite を使い、`cache.sqlite3` に保存します。旧版からの自動移行はありません。旧版はそのまま保管し、新しいフォルダに展開して監視先を再登録してください。
-
-大規模検証は `tests\run.bat` の後に `build\tests\runner\Tests.exe --sqlite-scale`。隔離した一時フォルダに実ファイル3万件を作成します。
-
-PC 間の移動やバックアップはアプリを完全終了してから `settings.json`、`settings.json.bak`（あれば）、`cache.sqlite3`（あれば）をコピーしてください。設定・キャッシュ・レポートには実パスが含まれるため、公開しないでください。
-
-本プロジェクトのソースは MIT License（`LICENSE`）です。同梱ランタイムなど第三者のライセンスは個別に適用されます。
+- リビルド: `tool\build.bat`。起動ファイルは `bin\かわったよ.exe`。同じフォルダの DLL も必要です。
+- IDE で開くプロジェクト: `avalonia/Kawattayo.Avalonia.csproj`。
+- ビルド要件・操作・データ移行: [Avalonia 版の使い方](avalonia/README.md)。

@@ -1,4 +1,4 @@
-# かわったよ Avalonia 版（v0.2.2）
+# かわったよ Avalonia 版（v0.2.3）
 
 Windows 11 x64 用の別ビルドです。Native AOT の配布 ZIP を展開し、
 `かわったよ.exe` を実行します。別途 .NET ランタイムや SQLite のインストールは不要です。
@@ -19,19 +19,21 @@ v0.1.3 以前の `cache.json` は読み込みません。実際の監視パス�
 - 「設定」で間隔、常駐、通知、再帰監視、除外、表示を変更できます。通知の表示は Windows の通知設定にも従います。
 - 「履歴」は変更種別やパスを検索できます。監視の比較データ、未読、履歴は SQLite、設定と監視先の登録は JSON に保存します。
 
+「未読」上部には「すべて折りたたむ」と「詳細」があります。「詳細」を押すと選択項目のパス・検知時刻・確認済みの範囲を表示します。
+
 ## 開発と検証
 
-旧 WinForms のプロジェクトは `src/` に残しています。Avalonia 版は `avalonia/` にあり、
-ファイル照会・SQLite・設定は従来と同じコードを使います。
+Avalonia の画面・ビルド設定は `avalonia/`、
+ファイル照会・SQLite・設定の実装は `src/` にあります。
 
 開発側では Windows x64、.NET 10 SDK、Visual Studio の C++ デスクトップ開発ツールが必要です。
 依存パッケージは NuGet.org から取得します。利用側に開発ツールは不要です。
 
 ```powershell
-.\tool\package-avalonia.ps1
+.\tool\build.bat
 ```
 
-出力は `build/Kawattayo_v0.2.2_Avalonia_Windows_x64.zip` です。
+実行ファイルと DLL は bin に出力します。配布 ZIP だけ作るには .\tool\package-avalonia.ps1 を実行します。Visual Studio で開く場合は avalonia/Kawattayo.Avalonia.csproj を選んでください。ZIP の出力は `build/Kawattayo_v0.2.3_Avalonia_Windows_x64.zip` です。
 `-p:KawattayoUseNls=true` は比較用。標準設定では Windows の ICU を使います。
 NLS にしても Skia・HarfBuzz の DLL は不要にはなりません。
 

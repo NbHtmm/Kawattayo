@@ -16,6 +16,9 @@ internal sealed partial class DesktopWindow
             try
             {
                 await VerifySaveRetry();
+                var inventoryFixture = Directory.CreateDirectory(Path.Combine(fixture, "inventory")).FullName;
+                InventoryTests.TestSplit(inventoryFixture);
+                InventoryTests.VerifyBulkFileRemoval(inventoryFixture);
                 Width = MinWidth;
                 Height = MinHeight;
                 var folder = Directory.CreateDirectory(Path.Combine(fixture, "監視テスト")).FullName;
@@ -38,7 +41,7 @@ internal sealed partial class DesktopWindow
                 Require(__inbox.Items.Count == 3 && __inbox.Items.Cast<Row>().Last().Path == sample, "再帰ツリーの展開");
                 await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                 var collapse = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "すべて折りたたむ"));
-                Require(Title == "かわったよ v0.2.2 · Avalonia", "タイトルのバージョン");
+                Require(Title == "かわったよ v0.2.3 · Avalonia", "タイトルのバージョン");
                 Require(collapse is { IsEffectivelyVisible: true, Bounds.Width: > 0, Bounds.Height: > 0 }
                     && collapse.TranslatePoint(default, this) is { } location
                     && location.X >= 0 && location.Y >= 0
@@ -46,6 +49,16 @@ internal sealed partial class DesktopWindow
                     && location.Y + collapse.Bounds.Height <= ClientSize.Height, "最小幅の未読タブにボタンを表示");
                 collapse.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
                 Require(__expanded.Count == 0 && __inbox.Items.Count == 1, "ボタン操作で一括折りたたみ");
+                var details = this.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "詳細"));
+                Require(details is { IsEffectivelyVisible: true, Bounds.Width: > 0, Bounds.Height: > 0 },
+                    "最小幅でも詳細ボタンが表示される");
+                Require(!__detailsBox.IsVisible, "詳細は初期状態で閉じている");
+                ExpandAll();
+                __inbox.SelectedIndex = __inbox.Items.Count - 1;
+                details.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                Require(__detailsBox.IsVisible && __detailsBox.Text?.Contains(sample) == true, "詳細に選択項目のパスを表示");
+                details.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                Require(!__detailsBox.IsVisible, "ボタンを再度押すと詳細を閉じる");
                 __tabs.SelectedIndex = 1;
                 RefreshTargets();
                 __targets.SelectedIndex = 0;

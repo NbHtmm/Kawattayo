@@ -1,6 +1,6 @@
 PROJECT_NAME = Kawattayo
 OUTPUT_DIRECTORY = build/doxygen
-INPUT = src
+INPUT = src avalonia
 FILE_PATTERNS = *.cs
 RECURSIVE = NO
 EXTRACT_PRIVATE = YES

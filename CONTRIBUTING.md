@@ -8,4 +8,4 @@
 - Doxygen の「Documenting the code」に従い、型・メソッドに `/// @brief`、フィールドには `//!<` を使う。自明でない分岐や寿命・単位・副作用は処理の近くに記述する。
 - 40 行を超える関数、3 段以上のネスト、長い式は責務単位で分割を検討する。順序に意味がある UI 構築やシナリオ試験は、分割で理解しにくくならないことも確認する。
 - 共通ポリシーは `AppDefaults.cs`、Windows の列挙・起動処理は専用クラスに置く。OS のエラー値・描画寸法など利用箇所に固有の定数はその近くに置く。
-- `tool\build.bat` と README の両テストで確認する。Doxygen 導入済みなら `doxygen Doxyfile` を実行する（ビルド時に取得しない）。
+- `tool\build.bat` と Avalonia の動作テストで確認する。Doxygen 導入済みなら `doxygen Doxyfile` を実行する（ビルド時に取得しない）。

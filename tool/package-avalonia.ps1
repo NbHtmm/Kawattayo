@@ -1,13 +1,16 @@
-# Windows x64 用の Native AOT 配布 ZIP。利用者データや PDB は入れない。
+﻿# Windows x64 用の Native AOT 配布 ZIP。利用者データや PDB は入れない。
 param(
     [string]$PublishDirectory,
-    [string]$AssetsFile
+    [string]$AssetsFile,
+    [switch]$CopyToBin
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
+    $project = Join-Path $root "avalonia/Kawattayo.Avalonia.csproj"
+    $version = ([xml](Get-Content -LiteralPath $project -Raw)).SelectSingleNode("/Project/PropertyGroup/Version").InnerText
     if (!$PublishDirectory) {
         $PublishDirectory = Join-Path $root ('build/avalonia-publish-' + [Guid]::NewGuid().ToString('N'))
         dotnet publish avalonia/Kawattayo.Avalonia.csproj -c Release -r win-x64 -p:PublishAot=true -p:OptimizationPreference=Size -p:DebugType=None -p:DebugSymbols=false -p:RestoreLockedMode=true --source https://api.nuget.org/v3/index.json -o $PublishDirectory
@@ -44,8 +47,9 @@ try {
         'licenses/HarfBuzzSharp-LICENSE.txt' = Find-PackageFile 'HarfBuzzSharp' 'LICENSE.txt'
         'licenses/HarfBuzzSharp-NOTICES.txt' = Find-PackageFile 'HarfBuzzSharp.NativeAssets.Win32' 'THIRD-PARTY-NOTICES.txt'
     }
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $output = Join-Path $root 'build/Kawattayo_v0.2.2_Avalonia_Windows_x64.zip'
+    $output = Join-Path $root "build/Kawattayo_v${version}_Avalonia_Windows_x64.zip"
     $temporary = $output + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
     try {
         $archive = [IO.Compression.ZipFile]::Open($temporary, [IO.Compression.ZipArchiveMode]::Create)
@@ -57,7 +61,18 @@ try {
         } finally { $archive.Dispose() }
         if ([IO.File]::Exists($output)) { [IO.File]::Replace($temporary, $output, [NullString]::Value) }
         else { [IO.File]::Move($temporary, $output) }
-        Get-Item -LiteralPath $output
+        if ($CopyToBin) {
+        # Copy build outputs only; never replace the existing settings or cache.
+        $bin = Join-Path $root "bin"
+        [void][IO.Directory]::CreateDirectory($bin)
+        foreach ($name in $entries.Keys) {
+            if ($name -like "*.dll" -or $name -like "*.exe") {
+                Copy-Item -LiteralPath $entries[$name] -Destination (Join-Path $bin $name) -Force
+            }
+        }
+        Write-Output ("Executable: " + (Join-Path $bin "かわったよ.exe"))
+    }
+    Get-Item -LiteralPath $output
     } finally {
         if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
     }

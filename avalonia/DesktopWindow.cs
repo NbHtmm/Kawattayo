@@ -19,7 +19,12 @@ internal sealed partial class DesktopWindow : Window
     private readonly WinDesktop __native;
     private readonly ListBox __inbox = NewList(), __targets = NewList(), __history = NewList();
     private readonly TabControl __tabs = new();
-    private readonly TextBlock __status = new(), __summary = new(), __details = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private readonly TextBlock __status = new(), __summary = new();
+    private readonly TextBox __detailsBox = new()
+    {
+        IsVisible = false, IsReadOnly = true, AcceptsReturn = true, MaxHeight = 96,
+        TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0)
+    };
     private readonly TextBox __filter = new() { PlaceholderText = "履歴を検索", Width = 220 };
     private readonly HashSet<string> __expanded = new(StringComparer.OrdinalIgnoreCase);
     private bool __closing, __closed;
@@ -52,8 +57,7 @@ internal sealed partial class DesktopWindow : Window
         __tabs.Items.Add(new TabItem { Header = "履歴", Content = BuildHistory() });
         __tabs.KeyDown += Keyboard;
         __tabs.SelectionChanged += (_, e) => { if (ReferenceEquals(e.Source, __tabs)) RefreshVisibleList(); };
-        __inbox.SelectionChanged += (_, _) => __details.Text = Selected(__inbox).FirstOrDefault() is { } row
-            ? $"{row.Path}  ｜  {row.Detail}  ｜  最終更新者：取得不可" : "";
+        __inbox.SelectionChanged += (_, _) => RefreshDetails();
         foreach (var list in new[] { __inbox, __targets, __history })
             list.DoubleTapped += async (_, e) =>
             {
@@ -134,7 +138,31 @@ internal sealed partial class DesktopWindow : Window
         Button("すべて展開", ExpandAll),
         Button("すべて折りたたむ", CollapseAll),
         Button("確認済み", () => Acknowledge(Selected(__inbox))),
-        Button("消失を消す", ClearDeleted)), __details);
+        Button("消失を消す", ClearDeleted),
+        Button("詳細", ToggleDetails)), __detailsBox);
+
+    private void ToggleDetails()
+    {
+        __detailsBox.IsVisible = !__detailsBox.IsVisible;
+        RefreshDetails();
+    }
+
+    private void RefreshDetails()
+    {
+        if (!__detailsBox.IsVisible) return;
+        var rows = Selected(__inbox);
+        if (rows.Length == 0)
+        {
+            __detailsBox.Text = "未読一覧から項目を選んでください。";
+            return;
+        }
+        var row = rows[0];
+        string detectedAt = row.At?.ToString("yyyy/MM/dd HH:mm:ss") ?? "—";
+        string scope = !row.Folder ? "このファイル" : row.Root ? "この監視対象の未読すべて" : "このフォルダ配下の未読";
+        __detailsBox.Text = $"{row.Name} ｜ {row.Detail}\n検知時刻：{detectedAt} ｜ 最終更新者：取得不可\n"
+            + $"確認済みの範囲：{scope}" + (rows.Length > 1 ? $"（先頭の選択項目。全 {rows.Length} 件を選択中）" : "")
+            + $"\nパス：{row.Path}";
+    }
 
     private void CollapseAll()
     {
