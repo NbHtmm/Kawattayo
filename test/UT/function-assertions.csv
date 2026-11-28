@@ -315,3 +315,8 @@ cli/Program.cs,"Program.Options.Options(string[] args, string[] fields, string[]
 "avalonia/Watch/DesktopWindow.Notifications.cs","ShareFileWatch.DesktopWindow.FindNotificationTarget(IEnumerable<WatchItem> items, string path)","DesktopWindowNotificationsTests","FindNotificationTarget_MatchesUnreadDirectAndNestedPathsIgnoringCase","1"
 "avalonia/Watch/DesktopWindow.Notifications.cs","ShareFileWatch.DesktopWindow.NotificationBranches(WatchItem target, string path)","DesktopWindowNotificationsTests","NotificationBranches_OnlyExpandsAncestorsForDirectAndDeepChildren","1"
 "avalonia/Watch/DesktopWindow.Notifications.cs","ShareFileWatch.DesktopWindow.FindNotificationRow(IEnumerable<Row> rows, Guid targetId, string path)","DesktopWindowNotificationsTests","FindNotificationRow_UsesBothPathAndRegistrationIdRatherThanFileNameOrArrayPosition","1"
+src/Windows/Persistence/MonitoringCache.cs,ShareFileWatch.MonitoringCache.Save(AppState state),MonitoringCacheTests,Save_SkipsEmptyAndUnchangedState,1
+src/Windows/Persistence/MonitoringCache.cs,ShareFileWatch.MonitoringCache.Save(AppState state),MonitoringCacheTests,Save_ReusesUnchangedInventoryAndPrunesSupersededOrRemovedSnapshots,1
+src/Windows/Persistence/MonitoringCache.cs,ShareFileWatch.MonitoringCache.Save(AppState state),MonitoringCacheTests,Save_PersistsHistoryEvenWithoutAnyTargetChanges,1
+src/Windows/Persistence/MonitoringCache.cs,ShareFileWatch.MonitoringCache.Save(AppState state),MonitoringCacheTests,Save_OpeningWriterFailureDoesNotSuppressNextSave,1
+src/Windows/Persistence/MonitoringCache.cs,ShareFileWatch.MonitoringCache.Save(AppState state),MonitoringCacheTests,Save_KeepsPriorBaselineAndRetriesAfterWriteFailure,9

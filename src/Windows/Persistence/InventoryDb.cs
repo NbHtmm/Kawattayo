@@ -5,7 +5,7 @@ using System.Text;
 namespace ShareFileWatch;
 
 // 比較一覧の世代は SQLite 内で共有し、監視状態と同じトランザクションで確定する。
-internal sealed partial class InventoryDb : IDisposable
+internal sealed partial class InventoryDb : IWatchCacheWriter
 {
     private nint db;
     internal InventoryDb(string file, bool create)
@@ -24,7 +24,7 @@ internal sealed partial class InventoryDb : IDisposable
     {
         if (rc != 0) throw new IOException($"フォルダ比較 DB: SQLite {rc}: {(db == 0 ? string.Empty : Marshal.PtrToStringUTF8(sqlite3_errmsg(db)))}");
     }
-    internal void Exec(string sql) => Check(sqlite3_exec(db, sql, 0, 0, 0));
+    public void Exec(string sql) => Check(sqlite3_exec(db, sql, 0, 0, 0));
     public void Dispose() { if (db != 0) { sqlite3_close(db); db = 0; } }
 
     private sealed class Statement : IDisposable
@@ -69,7 +69,7 @@ internal sealed partial class InventoryDb : IDisposable
         return (int)(hash & 255);
     }
 
-    internal string Write(Dictionary<string,Fingerprint> files)
+    public string Write(Dictionary<string,Fingerprint> files)
     {
         string id = Guid.NewGuid().ToString("N");
         using var snap = new Statement(this, "INSERT INTO snapshots VALUES(?,?)"); snap.Text(1,id); snap.Number(2,files.Count); snap.Run();
@@ -97,7 +97,7 @@ internal sealed partial class InventoryDb : IDisposable
         return id;
     }
 
-    internal void Prune(IEnumerable<string> keep)
+    public void Prune(IEnumerable<string> keep)
     {
         Exec("CREATE TEMP TABLE keep(id TEXT PRIMARY KEY); CREATE TEMP TABLE obsolete(hash TEXT PRIMARY KEY);");
         using var insert = new Statement(this,"INSERT OR IGNORE INTO keep VALUES(?)");

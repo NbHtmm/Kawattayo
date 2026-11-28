@@ -39,7 +39,7 @@ internal sealed partial class InventoryDb
         return query.Next();
     }
 
-    internal void CreateWatchCache() => Exec("""
+    public void CreateWatchCache() => Exec("""
         CREATE TABLE IF NOT EXISTS watch_state (
             watch_id TEXT PRIMARY KEY, path TEXT NOT NULL, folder INTEGER NOT NULL, recursive INTEGER NOT NULL,
             snapshot TEXT NOT NULL, baseline INTEGER, modified INTEGER, created INTEGER, bytes INTEGER, folder_stamp INTEGER,
@@ -110,7 +110,7 @@ internal sealed partial class InventoryDb
         item.Inventory = target.SnapshotId is { } id ? Read(id) : null;
     }
 
-    internal void WriteTarget(CachedTarget target, CachedTarget? prior)
+    public void WriteTarget(CachedTarget target, CachedTarget? prior)
     {
         using var row = new Statement(this, """
             INSERT OR REPLACE INTO watch_state(watch_id,path,folder,recursive,snapshot,baseline,modified,created,bytes,folder_stamp,
@@ -156,7 +156,7 @@ internal sealed partial class InventoryDb
         }
     }
 
-    internal void RemoveTarget(Guid id)
+    public void RemoveTarget(Guid id)
     {
         var key = id.ToString("N");
         DeleteByWatchId("DELETE FROM pending_changes WHERE watch_id=?", key);
@@ -170,7 +170,7 @@ internal sealed partial class InventoryDb
         row.Run();
     }
 
-    internal List<string> ReferencedSnapshots()
+    public List<string> ReferencedSnapshots()
     {
         using var rows = new Statement(this, "SELECT snapshot FROM watch_state WHERE snapshot <> ''");
         var ids = new List<string>();
@@ -193,7 +193,7 @@ internal sealed partial class InventoryDb
         return history.ToArray();
     }
 
-    internal void WriteHistory(IEnumerable<HistoryEntry> history)
+    public void WriteHistory(IEnumerable<HistoryEntry> history)
     {
         Exec("DELETE FROM change_history");
         using var row = new Statement(this, "INSERT INTO change_history(detected_at,path,kind) VALUES(?,?,?)");

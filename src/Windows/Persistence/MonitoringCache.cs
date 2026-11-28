@@ -1,8 +1,10 @@
 namespace ShareFileWatch;
 
 // SQLite にある監視専用の状態。チェックポイント操作からこのテーブル群を触らない。
-internal sealed class MonitoringCache(string database)
+internal sealed class MonitoringCache(string database, Func<IWatchCacheWriter> openWriter)
 {
+    internal MonitoringCache(string database) : this(database, () => new InventoryDb(database, true)) { }
+
     private readonly Dictionary<Guid, CachedTarget> __savedTargets = [];
     private HistoryEntry[] __savedHistory = [];
     internal void Restore(AppState state)
@@ -52,7 +54,7 @@ internal sealed class MonitoringCache(string database)
         if (removed.Length == 0 && changed.Length == 0 && !historyChanged) return;
         var committed = new List<CachedTarget>(changed.Length);
         bool inventoryChanged = removed.Length != 0;
-        using (var db = new InventoryDb(database, true))
+        using (var db = openWriter())
         {
             db.Exec("BEGIN IMMEDIATE");
             db.CreateWatchCache();
@@ -81,4 +83,17 @@ internal sealed class MonitoringCache(string database)
         foreach (var target in committed) __savedTargets[target.Id] = target;
         if (historyChanged) __savedHistory = state.History.ToArray();
     }
+}
+
+// 保存計画を実 DB から独立して検証するための書き込み口。読み出しは含めない。
+internal interface IWatchCacheWriter : IDisposable
+{
+    void Exec(string sql);
+    void CreateWatchCache();
+    void RemoveTarget(Guid id);
+    string Write(Dictionary<string, Fingerprint> files);
+    void WriteTarget(CachedTarget target, CachedTarget? prior);
+    void WriteHistory(IEnumerable<HistoryEntry> history);
+    void Prune(IEnumerable<string> keep);
+    List<string> ReferencedSnapshots();
 }
