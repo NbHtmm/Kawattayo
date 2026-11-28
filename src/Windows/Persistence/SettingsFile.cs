@@ -79,7 +79,7 @@ internal sealed class SettingsFile(string file)
         return data;
     }
 
-    private string SerializeSettings(AppState state) => JsonSerializer.Serialize(state, SettingsJsonContext.Default.AppState);
+    internal static string SerializeSettings(AppState state) => JsonSerializer.Serialize(state, SettingsJsonContext.Default.AppState);
 
     private void WriteSettings(string settings)
     {

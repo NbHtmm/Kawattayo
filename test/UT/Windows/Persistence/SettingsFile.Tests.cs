@@ -109,4 +109,43 @@ public sealed class SettingsFileTests
             Assert.Throws<JsonException>(() => SettingsFile.ValidateSettings(source)).InnerException);
     }
 
+
+    [Fact]
+    public void SerializeSettings_PreservesRegistrationAndLeavesLiveMonitoringDataOutOfJson()
+    {
+        var time = new DateTimeOffset(2026, 4, 5, 12, 30, 0, TimeSpan.FromHours(9));
+        var item = new WatchItem
+        {
+            Path = @"C:\fixture\logs", DisplayName = "計測ログ", IsFolder = true, RecursiveOverride = false,
+            Unread = 7, Inventory = new() { ["results.txt"] = new Fingerprint(1, 2, 3) }, LastChanged = time,
+        };
+        item.PendingFiles["results.txt"] = new FileChange("results.txt", "更新", time);
+        var state = new AppState { Items = [item], ExcludedFilePatterns = ["*.tmp"] };
+        state.History.Enqueue(new(time, item.Path, "更新"));
+
+        using var result = JsonDocument.Parse(SettingsFile.SerializeSettings(state));
+        var root = result.RootElement;
+        var saved = Assert.Single(root.GetProperty("Items").EnumerateArray());
+        Assert.Equal(item.Id, saved.GetProperty("Id").GetGuid());
+        Assert.Equal(item.DisplayName, saved.GetProperty("DisplayName").GetString());
+        Assert.Equal(item.Path, saved.GetProperty("Path").GetString());
+        Assert.False(saved.GetProperty("RecursiveOverride").GetBoolean());
+        Assert.Equal("*.tmp", Assert.Single(root.GetProperty("ExcludedFilePatterns").EnumerateArray()).GetString());
+        foreach (var property in new[] { "Inventory", "Unread", "PendingFiles", "LastChanged" })
+            Assert.False(saved.TryGetProperty(property, out _), property);
+        Assert.False(root.TryGetProperty("History", out _));
+    }
+
+    [Fact]
+    public void SerializeSettings_EmptyRegistrationSerializesDeterministically()
+    {
+        var original = new AppState { Items = [], WaitForStable = false };
+        string json = SettingsFile.SerializeSettings(original);
+
+        Assert.Equal(json, SettingsFile.SerializeSettings(original));
+        var restored = Assert.IsType<AppState>(JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppState));
+        Assert.Empty(restored.Items);
+        Assert.False(restored.WaitForStable);
+    }
+
 }
