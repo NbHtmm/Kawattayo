@@ -194,6 +194,46 @@ public sealed class MonitoringReducerTests
         Assert.Empty(state.History);
     }
 
+
+    [Fact]
+    public void Apply_VolumeRootUsesFullPathForAlertLabel()
+    {
+        var when = DateTimeOffset.UnixEpoch.AddDays(1);
+        string volume = Path.GetPathRoot(Path.GetFullPath("fixture"))!;
+        var target = new WatchItem { Path = volume, IsFolder = true, Baseline = ProbeState.Found,
+            Inventory = new(), DirectoryStamp = when.AddSeconds(-2).ToFileTime() };
+        var state = new AppState { Items = [target] };
+        var current = new FolderResult(new()) { DirectoryStamp = when.AddSeconds(-1).ToFileTime() };
+        var result = Assert.IsType<ObservationOutcome>(MonitoringReducer.Apply(
+            state, new(target.Id, 0, null, current, when, null), [], true));
+
+        Assert.Equal(new MonitorAlert(volume, $"{volume}：更新"), Assert.Single(result.Alerts));
+        Assert.Equal(volume, Assert.Single(state.History).Path);
+        Assert.Empty(result.FileUpdates);
+    }
+
+    [Fact]
+    public void Apply_BaselineMetadataChangesCanRequireSaveWithoutUnreadOrAlert()
+    {
+        var when = DateTimeOffset.UnixEpoch.AddDays(1);
+        var observedVersion = new Fingerprint(when.AddSeconds(-1).ToFileTime(), 1, 4);
+        var files = new Dictionary<string, Fingerprint> { ["report.txt"] = observedVersion };
+        var target = new WatchItem { Path = Path.GetFullPath("fixture"), IsFolder = true,
+            Inventory = files, Baseline = ProbeState.Found, InventoryExclusions = [] };
+        var state = new AppState { Items = [target] };
+
+        var result = Assert.IsType<ObservationOutcome>(MonitoringReducer.Apply(state,
+            new(target.Id, 0, null, new FolderResult(files) { DirectoryStamp = 0 }, when, []), [], true));
+
+        Assert.True(result.NeedsSave);
+        Assert.False(result.UnreadChanged);
+        Assert.Empty(result.Alerts);
+        Assert.Empty(result.FileUpdates);
+        Assert.Empty(state.History);
+        Assert.Equal(0L, target.DirectoryStamp);
+        Assert.Equal(when.AddSeconds(-1), target.LatestFileWriteAt);
+    }
+
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
