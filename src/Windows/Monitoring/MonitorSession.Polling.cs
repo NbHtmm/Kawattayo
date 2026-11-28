@@ -63,7 +63,7 @@ internal sealed partial class MonitorSession
         {
             if (__settled.HasPending(i.Id) || !low || !__checks.TryGetValue(i.Id,out var c) || !c.Reliable || c.Revision != i.Revision) return true;
             var f = feeds!.GetValueOrDefault(i.Id);
-            return ReconciliationDue(c) || f != c.Feed || f is null || !f.Available ||
+            return ReconciliationDue(c.LastFull, __clock) || f != c.Feed || f is null || !f.Available ||
                 f.Epoch != c.Epoch || f.Failed || f.Stamp(i.IsFolder, i.Path) != c.Stamp;
         }
         var groups = __state.Items
@@ -95,7 +95,7 @@ internal sealed partial class MonitorSession
         {
             foreach (var target in targets)
             {
-                if (!CanApplyScan(generation))
+                if (!CanApplyScan(generation, __scanGeneration, __closing, __state.Paused))
                 {
                     break;
                 }
@@ -106,7 +106,7 @@ internal sealed partial class MonitorSession
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            if (CanApplyScan(generation))
+            if (CanApplyScan(generation, __scanGeneration, __closing, __state.Paused))
             {
                 __pollError = "照会に失敗：" + ex.Message;
             }
@@ -141,7 +141,7 @@ internal sealed partial class MonitorSession
         {
             var feed = target.Feed;
             if (feed is not null) await feed.Start(Environment.TickCount64);
-            if (!CanApplyScan(generation)) return;
+            if (!CanApplyScan(generation, __scanGeneration, __closing, __state.Paused)) return;
 
             var baseline = item.Inventory;
             var priorExclusions = item.InventoryExclusions;
@@ -156,7 +156,7 @@ internal sealed partial class MonitorSession
 #if KAWATTAYO_SMOKE
             BeforeApplyForTest?.Invoke();
 #endif
-            if (!CanApplyScan(generation)) return;
+            if (!CanApplyScan(generation, __scanGeneration, __closing, __state.Paused)) return;
 
             // 監視先の一部が遅くても、取得できた結果から表示・保存に回す。
             ApplyResult(result, seenPaths);
@@ -175,15 +175,15 @@ internal sealed partial class MonitorSession
         var feed = target.Feed;
         if (target.IsFolder && baseline is not null && feed is { Failed: false, Available: true } &&
             __checks.TryGetValue(target.Id, out var prior) && prior.Reliable && prior.Feed == feed &&
-            prior.Epoch == feed.Epoch && prior.Revision == target.Revision && !ReconciliationDue(prior))
+            prior.Epoch == feed.Epoch && prior.Revision == target.Revision && !ReconciliationDue(prior.LastFull, __clock))
             return feed.Snapshot(prior.Stamp);
 
         return (feed?.Stamp(target.IsFolder, target.Path) ?? 0, null);
     }
 
     // イベントが来ないままでも、最後の全件成功から一定時間後に読み直す。
-    private bool ReconciliationDue(Checkpoint prior) =>
-        prior.LastFull is not long last || __clock.GetElapsedTime(last) >= ReconcileInterval;
+    internal static bool ReconciliationDue(long? lastFull, TimeProvider clock) =>
+        lastFull is not long last || clock.GetElapsedTime(last) >= ReconcileInterval;
 
     private void UpdateCheckpoint(ScanTarget target, WatchObservation result, long stamp, bool full)
     {
@@ -200,8 +200,8 @@ internal sealed partial class MonitorSession
         __checks[target.Id] = new(target.Revision, feed, stamp, reliable, feed?.Epoch ?? 0, lastFull);
     }
 
-    private bool CanApplyScan(int generation) =>
-        !__closing && !__state.Paused && generation == __scanGeneration;
+    internal static bool CanApplyScan(int generation, int currentGeneration, bool closing, bool paused) =>
+        !closing && !paused && generation == currentGeneration;
 
     private sealed record ScanTarget(WatchScanRequest Request, bool Low, ChangeFeed? Feed)
     {
