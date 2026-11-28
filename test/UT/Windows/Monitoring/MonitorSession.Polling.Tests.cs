@@ -214,6 +214,408 @@ public sealed class MonitorSessionPollingTests
         Assert.Equal(new[] { "stop", "interval", "start" }, timer.Calls);
     }
 
+    [Fact]
+    public async Task Scan_ReliableQuietFolderSkipsUnchangedAndReadsOnlyDirtyPaths()
+    {
+        var feed = new FakeFeed();
+        var fixture = FolderFixture(feed);
+        var paths = RecordFolderReads(fixture);
+        await fixture.Session.Scan(automatic: true);
+        Assert.Null(Assert.Single(paths));
+        await fixture.Session.Scan(automatic: true);
+        Assert.Single(paths);
+
+        feed.Record(@"C:\fixture\logs\report.txt");
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(new[] { @"C:\fixture\logs\report.txt" }, paths[1]);
+        Assert.Equal(0, feed.LastCursor);
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(2, paths.Count);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_QuietShareFailurePreservesInventoryAndRecoveryRequiresFullRead()
+    {
+        var feed = new FakeFeed();
+        var fixture = FolderFixture(feed);
+        var item = Assert.Single(fixture.State.Items);
+        var paths = RecordFolderReads(fixture, failAt: 2);
+        await fixture.Session.Scan(automatic: true);
+        var baseline = item.Inventory;
+        Assert.NotNull(baseline);
+
+        feed.Record(@"C:\fixture\logs\report.txt");
+        await fixture.Session.Scan(automatic: true);
+        Assert.Same(baseline, item.Inventory);
+        Assert.Equal(0, item.Unread);
+        Assert.Equal("照会失敗（毎回照会）", fixture.Session.DescribeChangeFeed(item));
+
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(3, paths.Count);
+        Assert.Null(paths[2]);
+        Assert.Equal("通知待機中", fixture.Session.DescribeChangeFeed(item));
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(3, paths.Count);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_ReplacedFeedAndMissingJournalAndReconciliationDeadlineUseFullReads()
+    {
+        var feed = new FakeFeed();
+        var clock = new MutableClock();
+        var fixture = FolderFixture(feed, clock);
+        var paths = RecordFolderReads(fixture);
+        await fixture.Session.Scan(automatic: true);
+        feed.Epoch++;
+        await fixture.Session.Scan(automatic: true);
+        Assert.Null(paths[1]);
+
+        feed.Record(@"C:\fixture\logs\report.txt");
+        feed.LostHistory = true;
+        await fixture.Session.Scan(automatic: true);
+        Assert.Null(paths[2]);
+
+        clock.Timestamp = TimeSpan.FromMinutes(15).Ticks - 1;
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(3, paths.Count);
+        clock.Timestamp++;
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(4, paths.Count);
+        Assert.All(paths, value => Assert.Null(value));
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_ManualFailureInvalidatesQuietBaselineButManualSuccessDoesNotAdvanceQuietCursor()
+    {
+        var feed = new FakeFeed();
+        var fixture = FolderFixture(feed);
+        var paths = RecordFolderReads(fixture, failAt: 4);
+        await fixture.Session.Scan(automatic: true);
+        feed.Record(@"C:\fixture\logs\report.txt");
+
+        await fixture.Session.Scan(); // Manual scans always probe in full.
+        Assert.Null(paths[1]);
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(new[] { @"C:\fixture\logs\report.txt" }, paths[2]);
+
+        await fixture.Session.Scan();
+        Assert.Null(paths[3]);
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(5, paths.Count);
+        Assert.Null(paths[4]);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_StaleQuietResultCannotConsumeEventOrPublishAChange()
+    {
+        var feed = new FakeFeed();
+        var fixture = FolderFixture(feed);
+        var file = Assert.Single(fixture.State.Items);
+        var at = DateTimeOffset.UnixEpoch;
+        var observed = new Fingerprint(10, 1, 10);
+        bool stale = false;
+        int calls = 0;
+        fixture.Observe = (request, _) =>
+        {
+            calls++;
+            return new(request.Id, request.Revision + (stale ? 1 : 0), null,
+                new(new(StringComparer.OrdinalIgnoreCase) { ["report.txt"] = observed }), at, null);
+        };
+
+        await fixture.Session.Scan(automatic: true);
+        observed = observed with { Bytes = 30 };
+        at = at.AddSeconds(1);
+        stale = true;
+        feed.Record(@"C:\fixture\logs\report.txt");
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(0, file.Unread);
+        Assert.Equal(DateTimeOffset.UnixEpoch, file.LastChecked);
+        Assert.Empty(fixture.State.History);
+        Assert.Equal(10UL, file.Inventory!["report.txt"].Bytes);
+
+        stale = false;
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(3, calls);
+        Assert.Equal(1, file.Unread);
+        Assert.Equal(30UL, file.Inventory!["report.txt"].Bytes);
+        Assert.Equal(at, file.LastChecked);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_UnavailableOrFailedFeedDoesNotAllowQuietSkipping()
+    {
+        var feed = new FakeFeed { Available = false };
+        var fixture = FolderFixture(feed);
+        var paths = RecordFolderReads(fixture);
+        await fixture.Session.Scan(automatic: true);
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(2, paths.Count);
+        Assert.Equal("利用不可（毎回照会）", fixture.Session.DescribeChangeFeed(fixture.State.Items[0]));
+
+        feed.Available = true;
+        await fixture.Session.Scan(automatic: true);
+        feed.Failed = true;
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(4, paths.Count);
+        Assert.All(paths, value => Assert.Null(value));
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_ClosingDuringProbeDiscardsCancellationAndDoesNotStartAnotherTarget()
+    {
+        var fixture = new MonitorFixture();
+        var first = fixture.AddFile("a.txt");
+        var second = fixture.AddFile("b.txt");
+        var begun = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stop = TestContext.Current.CancellationToken;
+        using var release = new ManualResetEventSlim(false);
+        fixture.Observe = (request, token) =>
+        {
+            Assert.Equal(first.Id, request.Id);
+            begun.SetResult(token);
+            Assert.True(release.Wait(TimeSpan.FromSeconds(5), stop));
+            token.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("Expected scan token to be canceled.");
+        };
+        var scan = fixture.Session.Scan();
+        try
+        {
+            var token = await begun.Task.WaitAsync(TimeSpan.FromSeconds(5), stop);
+            await fixture.Session.Close();
+            Assert.True(token.IsCancellationRequested);
+        }
+        finally { release.Set(); }
+
+        await scan.WaitAsync(TimeSpan.FromSeconds(5), stop);
+        Assert.False(fixture.Poll.IsEnabled);
+        Assert.False(fixture.Flush.IsEnabled);
+        Assert.True(first.QueryStopped);
+        Assert.Null(first.QueryStart);
+        Assert.Null(second.QueryMs);
+        Assert.Empty(fixture.State.History);
+    }
+
+    [Fact]
+    public async Task Scan_FileFeedTreatsMissingAsSuccessfulAndUnavailableAsRetryable()
+    {
+        var feed = new FakeFeed();
+        var fixture = new MonitorFixture(createFeed: (_, _) => feed);
+        fixture.State.LowServerLoad = true;
+        var file = fixture.AddFile("report.txt");
+        int calls = 0;
+        fixture.Observe = (request, _) => new(request.Id, request.Revision,
+            ++calls == 2 ? new(ProbeState.Unavailable, Error: "offline") : new(ProbeState.Missing),
+            null, DateTimeOffset.UnixEpoch.AddSeconds(calls), null);
+
+        Assert.Equal("未確認", fixture.Session.DescribeChangeFeed(file));
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal("通知待機中", fixture.Session.DescribeChangeFeed(file));
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(1, calls);
+        feed.Record(file.Path);
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal("照会失敗（毎回照会）", fixture.Session.DescribeChangeFeed(file));
+        Assert.Equal(ProbeState.Missing, file.Baseline);
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(3, calls);
+        Assert.Equal("通知待機中", fixture.Session.DescribeChangeFeed(file));
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_QuietNotificationWaitResamplesFileWithoutNewJournalEvent()
+    {
+        var feed = new FakeFeed();
+        var clock = new MutableClock();
+        var fixture = FolderFixture(feed, clock);
+        fixture.State.WaitForStable = true;
+        fixture.State.StableSeconds = 2;
+        var observed = new Fingerprint(10, 1, 10);
+        var alerts = new List<MonitorAlert>();
+        var inputs = new List<string[]?>();
+        fixture.Session.Alerts += values => alerts.AddRange(values);
+        fixture.ReadWithDelta = (request, _, _, paths) =>
+        {
+            inputs.Add(paths);
+            return new(request.Id, request.Revision, null, new(new(StringComparer.OrdinalIgnoreCase)
+                { ["report.txt"] = observed }), DateTimeOffset.UnixEpoch, null);
+        };
+        await fixture.Session.Scan(automatic: true);
+        observed = observed with { Bytes = 20 };
+        feed.Record(@"C:\fixture\logs\report.txt");
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(1, fixture.Session.WaitingNotifications);
+        Assert.Empty(alerts);
+
+        clock.Timestamp = TimeSpan.FromSeconds(2).Ticks;
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(3, inputs.Count);
+        Assert.Equal(new[] { @"C:\fixture\logs\report.txt" }, inputs[2]);
+        Assert.Equal(@"C:\fixture\logs\report.txt", Assert.Single(alerts).Path);
+        Assert.Equal(0, fixture.Session.WaitingNotifications);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_ExcludedRegistrationsDoNotUseFeedSlotsAndAllocatedFeedsAreRetired()
+    {
+        var feeds = new List<FakeFeed>();
+        var fixture = new MonitorFixture(createFeed: (_, _) =>
+        {
+            var feed = new FakeFeed();
+            feeds.Add(feed);
+            return feed;
+        });
+        fixture.State.LowServerLoad = true;
+        fixture.State.ExcludedFilePatterns = ["*.tmp"];
+        var excluded = fixture.AddFile("excluded.tmp");
+        var a = fixture.AddFile("a.txt");
+        var b = fixture.AddFile("b.txt");
+        var directories = Enumerable.Range(0, 16).Select(i => new WatchItem
+            { Path = Path.Combine(@"C:\fixture", $"folder-{i}"), IsFolder = true, Recursive = true }).ToArray();
+        fixture.State.Items.AddRange(directories);
+        fixture.Observe = (request, _) => new(request.Id, request.Revision, request.IsFolder ? null : new(ProbeState.Missing),
+            request.IsFolder ? new(new()) : null, DateTimeOffset.UnixEpoch, null);
+        await fixture.Session.Scan(automatic: true);
+        Assert.Equal(16, feeds.Count);
+        Assert.True(feeds[0].Names.ContainsKey(a.Path) && feeds[0].Names.ContainsKey(b.Path));
+        Assert.Equal(2, feeds[0].Names.Count);
+        Assert.Equal("除外", fixture.Session.DescribeChangeFeed(excluded));
+        Assert.Equal("購読枠外（毎回照会）", fixture.Session.DescribeChangeFeed(directories[^1]));
+        fixture.Session.RemoveTargets([a]);
+        Assert.All(feeds, feed => Assert.True(feed.Retired));
+
+        await fixture.Session.Scan(automatic: true);
+        Assert.Single(feeds[16].Names);
+        Assert.True(feeds[16].Names.ContainsKey(b.Path));
+        fixture.State.LowServerLoad = false;
+        Assert.Equal("オフ（毎回照会）", fixture.Session.DescribeChangeFeed(b));
+        fixture.State.Paused = true;
+        Assert.Equal("一時停止", fixture.Session.DescribeChangeFeed(b));
+        await fixture.Session.Close();
+        Assert.All(feeds, feed => Assert.True(feed.Retired));
+    }
+
+    [Fact]
+    public async Task Scan_RescheduleSuppressesOldProbeErrorAndPrioritizesNextPoll()
+    {
+        var fixture = new MonitorFixture();
+        var file = fixture.AddFile("report.txt");
+        var stop = TestContext.Current.CancellationToken;
+        var begun = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim(false);
+        fixture.Observe = (_, _) =>
+        {
+            begun.SetResult();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(5), stop));
+            throw new IOException("obsolete share failure");
+        };
+
+        var scan = fixture.Session.Scan();
+        try
+        {
+            await begun.Task.WaitAsync(TimeSpan.FromSeconds(5), stop);
+            fixture.Session.SetExclusions("*.tmp");
+        }
+        finally { release.Set(); }
+
+        await scan.WaitAsync(TimeSpan.FromSeconds(5), stop);
+        Assert.Equal("監視中", fixture.Session.Status);
+        Assert.Null(file.LastChecked);
+        Assert.True(fixture.Poll.IsEnabled);
+        Assert.Equal(TimeSpan.FromMilliseconds(50), fixture.Poll.Interval);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_PausedWhileWaitingForFeedDoesNotStartProbe()
+    {
+        var delay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var feed = new FakeFeed { StartAsync = () => delay.Task };
+        var fixture = FolderFixture(feed);
+        var file = Assert.Single(fixture.State.Items);
+        int calls = 0;
+        fixture.Observe = (request, _) => { calls++; return new(request.Id, request.Revision, null, new(new()), DateTimeOffset.UnixEpoch, null); };
+
+        var scan = fixture.Session.Scan(automatic: true);
+        try
+        {
+            Assert.NotNull(file.QueryStart);
+            fixture.Session.PauseOrResume();
+        }
+        finally { delay.SetResult(); }
+
+        await scan.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(0, calls);
+        Assert.Null(file.LastChecked);
+        Assert.True(file.QueryStopped);
+        Assert.True(feed.Retired);
+        await fixture.Session.Close();
+    }
+
+    private static MonitorFixture FolderFixture(FakeFeed feed, TimeProvider? clock = null)
+    {
+        var fixture = new MonitorFixture(clock, (_, _) => feed);
+        fixture.State.LowServerLoad = true;
+        fixture.State.WaitForStable = false;
+        fixture.State.Items.Add(new WatchItem { Path = @"C:\fixture\logs", IsFolder = true, Recursive = true });
+        return fixture;
+    }
+
+    private static List<string[]?> RecordFolderReads(MonitorFixture fixture, int failAt = -1)
+    {
+        var inputs = new List<string[]?>();
+        fixture.ReadWithDelta = (request, _, _, paths) =>
+        {
+            inputs.Add(paths);
+            var folder = inputs.Count == failAt
+                ? new FolderResult(null, "share unavailable")
+                : new FolderResult(new(StringComparer.OrdinalIgnoreCase) { ["report.txt"] = new(10, 1, 10) });
+            return new(request.Id, request.Revision, null, folder, DateTimeOffset.UnixEpoch.AddSeconds(inputs.Count), null);
+        };
+        return inputs;
+    }
+
+    private sealed class FakeFeed : MonitorSession.IChangeFeed
+    {
+        public System.Collections.Concurrent.ConcurrentDictionary<string, long> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool Available { get; set; } = true;
+        public bool Failed { get; set; }
+        public int Epoch { get; set; }
+        public bool LostHistory { get; set; }
+        public long LastCursor { get; private set; } = -1;
+        private readonly List<string> paths = [];
+        public long Stamp(bool folder, string path) => folder ? paths.Count : Names.GetValueOrDefault(path);
+        public (long Stamp, string[]? Paths) Snapshot(long since)
+        {
+            LastCursor = since;
+            return (paths.Count, LostHistory ? null : paths.Skip((int)since).ToArray());
+        }
+        public Func<Task> StartAsync { get; init; } = () => Task.CompletedTask;
+        public Task Start(long now) => StartAsync();
+        public bool Retired { get; private set; }
+        public void Retire() => Retired = true;
+        public void Record(string path)
+        {
+            paths.Add(path);
+            if (Names.ContainsKey(path)) Names.AddOrUpdate(path, 1, (_, current) => current + 1);
+        }
+    }
+
+    private sealed class MutableClock : TimeProvider
+    {
+        public long Timestamp { get; set; }
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Timestamp;
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch;
+    }
+
     private sealed class RecordingTimer : IMonitorTimer
     {
         private TimeSpan _interval;

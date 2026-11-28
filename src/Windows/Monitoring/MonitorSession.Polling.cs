@@ -165,8 +165,8 @@ internal sealed partial class MonitorSession
             if (!CanApplyScan(generation, __scanGeneration, __closing, __state.Paused)) return;
 
             // 監視先の一部が遅くても、取得できた結果から表示・保存に回す。
-            ApplyResult(result, seenPaths);
-            UpdateCheckpoint(target, result, stamp, full: paths is null);
+            // 旧リビジョンの結果を捨てる場合、その照会が読んだ通知の位置も進めない。
+            if (ApplyResult(result, seenPaths)) UpdateCheckpoint(target, result, stamp, full: paths is null);
         }
         finally
         {
@@ -209,7 +209,7 @@ internal sealed partial class MonitorSession
     internal static bool CanApplyScan(int generation, int currentGeneration, bool closing, bool paused) =>
         !closing && !paused && generation == currentGeneration;
 
-    private sealed record ScanTarget(WatchScanRequest Request, bool Low, ChangeFeed? Feed)
+    private sealed record ScanTarget(WatchScanRequest Request, bool Low, IChangeFeed? Feed)
     {
         internal Guid Id => Request.Id;
         internal string Path => Request.Path;
@@ -217,7 +217,7 @@ internal sealed partial class MonitorSession
         internal int Revision => Request.Revision;
     }
 
-    private void ApplyResult(WatchObservation result, HashSet<string> seenPaths)
+    private bool ApplyResult(WatchObservation result, HashSet<string> seenPaths)
     {
         var item = __state.Items.Find(x => x.Id == result.Id);
         var hook = item is null ? null : Hooks.Get(item.Id, item.Path);
@@ -225,7 +225,7 @@ internal sealed partial class MonitorSession
 #if KAWATTAYO_SMOKE
         collectHookCandidates |= HookCandidateForTest is not null;
 #endif
-        if (MonitoringReducer.Apply(__state, result, seenPaths, collectHookCandidates) is not { } outcome) return;
+        if (MonitoringReducer.Apply(__state, result, seenPaths, collectHookCandidates) is not { } outcome) return false;
 #if KAWATTAYO_SMOKE
         if (HookCandidateForTest is { } observer)
             foreach (var file in outcome.FileUpdates) observer(file);
@@ -241,5 +241,6 @@ internal sealed partial class MonitorSession
         __inboxPending |= outcome.UnreadChanged;
         DeliverAlerts(item!, result, outcome.Alerts);
         if (!__scanFlush.IsEnabled) __scanFlush.Start();
+        return true;
     }
 }

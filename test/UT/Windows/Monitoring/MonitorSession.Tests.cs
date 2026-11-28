@@ -119,12 +119,14 @@ internal sealed class MonitorFixture
     internal Func<WatchScanRequest, CancellationToken, WatchObservation> Observe { get; set; } =
         (_, _) => throw new InvalidOperationException("Unexpected observation");
 
-    internal MonitorFixture(TimeProvider? clock = null)
+    internal Func<WatchScanRequest, CancellationToken, Dictionary<string, Fingerprint>?, string[]?, WatchObservation>? ReadWithDelta { get; set; }
+
+    internal MonitorFixture(TimeProvider? clock = null, Func<string, bool, MonitorSession.IChangeFeed>? createFeed = null)
     {
         Session = new MonitorSession(new MonitorSession.Boundaries(() => (State, "load warning"),
             snapshot => { if (SaveError is { } e) throw e; Saves.Enqueue(snapshot); },
             path => Owned(path), path => DirectoryExists(path), path => FileExists(path),
-            (request, token, _, _, _) => Observe(request, token), () => Hooks), Poll, Flush, clock);
+            (request, token, baseline, paths, _) => ReadWithDelta?.Invoke(request, token, baseline, paths) ?? Observe(request, token), () => Hooks, createFeed), Poll, Flush, clock);
     }
 
     internal WatchItem AddFile(string name)

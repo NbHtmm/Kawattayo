@@ -10,21 +10,34 @@ internal sealed partial class MonitorSession
     internal bool UseSyntheticFeedForTest { get; set; }
     internal void FeedEventForTest(string path)
     {
-        foreach (var feed in __feeds.Values) feed.Signal(path);
+        foreach (var feed in __feeds.Values.OfType<ChangeFeed>()) feed.Signal(path);
     }
     internal void FailFeedForTest()
     {
-        foreach (var feed in __feeds.Values) feed.Failed = true;
+        foreach (var feed in __feeds.Values.OfType<ChangeFeed>()) feed.Failed = true;
     }
 #endif
-    private readonly Dictionary<string, ChangeFeed> __feeds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IChangeFeed> __feeds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, Checkpoint> __checks = [];
-    private sealed record Checkpoint(int Revision, ChangeFeed? Feed, long Stamp, bool Reliable, int Epoch, long? LastFull);
+    private sealed record Checkpoint(int Revision, IChangeFeed? Feed, long Stamp, bool Reliable, int Epoch, long? LastFull);
 
     // Callbacks only set dirty markers. Independent registrations in one directory share a handle.
-    internal sealed class ChangeFeed(string directory, bool recursive, Func<string,bool> internalFile)
+    // The session consumes a change journal; opening Windows handles stays in the concrete feed.
+    internal interface IChangeFeed
     {
-        public readonly ConcurrentDictionary<string,long> Names = new(StringComparer.OrdinalIgnoreCase);
+        ConcurrentDictionary<string, long> Names { get; }
+        bool Available { get; }
+        bool Failed { get; }
+        int Epoch { get; }
+        long Stamp(bool folder, string path);
+        (long Stamp, string[]? Paths) Snapshot(long since);
+        Task Start(long now);
+        void Retire();
+    }
+
+    internal sealed class ChangeFeed(string directory, bool recursive, Func<string,bool> internalFile) : IChangeFeed
+    {
+        public ConcurrentDictionary<string,long> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
         private long version;
         private readonly Dictionary<string,long> journal = new(StringComparer.OrdinalIgnoreCase);
         private long discarded;
@@ -45,6 +58,8 @@ internal sealed partial class MonitorSession
         private FileSystemWatcher? parentWatcher;
         public volatile bool Failed;
         public int Epoch;
+        bool IChangeFeed.Failed => Failed;
+        int IChangeFeed.Epoch => Epoch;
         private long retry;
         private bool retired;
         internal void Signal(string path)
@@ -102,11 +117,11 @@ internal sealed partial class MonitorSession
         public void Retire() { retired = true; CloseWatchers(); }
     }
 
-    private Dictionary<Guid,ChangeFeed> PrepareFeeds()
+    private Dictionary<Guid,IChangeFeed> PrepareFeeds()
     {
-        var bindings = new Dictionary<Guid,ChangeFeed>();
+        var bindings = new Dictionary<Guid,IChangeFeed>();
         var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var names = new Dictionary<ChangeFeed,HashSet<string>>();
+        var names = new Dictionary<IChangeFeed,HashSet<string>>();
         int slots = 0;
         foreach (var item in __state.Items)
         {
@@ -121,9 +136,10 @@ internal sealed partial class MonitorSession
                 if (slots + cost > SubscriptionLimit) continue;
                 slots += cost; keep.Add(key);
             }
-            if (!__feeds.TryGetValue(key,out var feed)) __feeds[key] = feed = new(dir,recursive,__boundaries.IsInternalFile);
+            if (!__feeds.TryGetValue(key,out var feed))
+                __feeds[key] = feed = __boundaries.CreateFeed?.Invoke(dir, recursive) ?? new ChangeFeed(dir, recursive, __boundaries.IsInternalFile);
 #if KAWATTAYO_SMOKE
-            feed.Synthetic = UseSyntheticFeedForTest;
+            if (feed is ChangeFeed native) native.Synthetic = UseSyntheticFeedForTest;
 #endif
             bindings[item.Id] = feed;
             if (!names.TryGetValue(feed,out var set)) names[feed] = set = new(StringComparer.OrdinalIgnoreCase);

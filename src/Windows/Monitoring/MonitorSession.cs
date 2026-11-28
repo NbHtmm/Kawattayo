@@ -23,7 +23,7 @@ internal sealed partial class MonitorSession
     internal sealed record Boundaries(Func<(AppState State, string? Warning)> Load, Action<AppState> Save,
         Func<string, bool> IsInternalFile, Func<string, bool> DirectoryExists, Func<string, bool> FileExists,
         Func<WatchScanRequest, CancellationToken, Dictionary<string, Fingerprint>?, string[]?, string[]?, WatchObservation> Read,
-        Func<IUpdateHooks> CreateHooks);
+        Func<IUpdateHooks> CreateHooks, Func<string, bool, IChangeFeed>? CreateFeed = null);
 
     internal MonitorSession(Boundaries boundaries, IMonitorTimer pollTimer, IMonitorTimer flushTimer, TimeProvider? clock = null)
     {
