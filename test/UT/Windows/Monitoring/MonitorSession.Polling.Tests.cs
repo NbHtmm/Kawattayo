@@ -34,6 +34,51 @@ public sealed class MonitorSessionPollingTests
     }
 
 
+
+    [Fact]
+    public void SchedulePoll_DoesNotStartWhenClosingPausedOrWithoutRegistrations()
+    {
+        foreach (var (closing, paused, registrations) in new[]
+        {
+            (true, false, 1), (false, true, 1), (false, false, 0), (true, true, 0),
+        })
+        {
+            var timer = new RecordingTimer();
+            MonitorSession.SchedulePoll(timer, closing, paused, registrations, immediate: true, seconds: 17);
+            Assert.Equal(new[] { "stop" }, timer.Calls);
+        }
+    }
+
+    [Fact]
+    public void SchedulePoll_StopsBeforeSchedulingEitherTheConfiguredOrImmediateInterval()
+    {
+        var timer = new RecordingTimer();
+        MonitorSession.SchedulePoll(timer, closing: false, paused: false, registrations: 1, immediate: false, seconds: 17);
+        Assert.Equal(TimeSpan.FromSeconds(17), timer.Interval);
+        Assert.Equal(new[] { "stop", "interval", "start" }, timer.Calls);
+
+        timer.Calls.Clear();
+        MonitorSession.SchedulePoll(timer, closing: false, paused: false, registrations: 2, immediate: true, seconds: 17);
+        Assert.Equal(TimeSpan.FromMilliseconds(50), timer.Interval);
+        Assert.Equal(new[] { "stop", "interval", "start" }, timer.Calls);
+    }
+
+    private sealed class RecordingTimer : IMonitorTimer
+    {
+        private TimeSpan _interval;
+        public List<string> Calls { get; } = [];
+        public TimeSpan Interval
+        {
+            get => _interval;
+            set { _interval = value; Calls.Add("interval"); }
+        }
+        public bool IsEnabled { get; private set; }
+        public event Action? Elapsed { add { } remove { } }
+        public void Start() { IsEnabled = true; Calls.Add("start"); }
+        public void Stop() { IsEnabled = false; Calls.Add("stop"); }
+    }
+
+
     private sealed class FixedClock(long timestamp) : TimeProvider
     {
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;

@@ -34,17 +34,19 @@ internal sealed partial class MonitorSession
     }
 
 
-    internal void StartTimer(bool immediate = false)
-    {
-        __pollTimer.Stop();
-        if (__closing || __state.Paused || __state.Items.Count == 0)
-        {
-            return;
-        }
+    internal void StartTimer(bool immediate = false) =>
+        SchedulePoll(__pollTimer, __closing, __state.Paused, __state.Items.Count, immediate, __state.PollSeconds);
 
-        __pollTimer.Interval = immediate ? TimeSpan.FromMilliseconds(50) : TimeSpan.FromSeconds(__state.PollSeconds);
-        __pollTimer.Start();
+    // どの条件でも旧タイマーを止め、監視できる場合にだけ次回の巡回を予約する。
+    internal static void SchedulePoll(IMonitorTimer timer, bool closing, bool paused, int registrations, bool immediate, int seconds)
+    {
+        timer.Stop();
+        if (closing || paused || registrations == 0) return;
+
+        timer.Interval = immediate ? TimeSpan.FromMilliseconds(50) : TimeSpan.FromSeconds(seconds);
+        timer.Start();
     }
+
 
     /// @brief 空いている共有先だけ巡回。応答待ちの共有先は次の周期でも重複実行しない。
     internal Task Scan(bool automatic = false)
