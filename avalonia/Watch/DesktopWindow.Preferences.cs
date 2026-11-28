@@ -94,10 +94,16 @@ internal sealed partial class DesktopWindow
         }, rules, Bar(Button("除外ルールを適用", () => SetExclusions(rules.Text ?? "")),
             Button("Officeの一時ファイルを追加", () =>
             {
-                var text = rules.Text?.TrimEnd() ?? "";
-                if (text.Split('\n').Any(x => x.Trim() == "~$*")) return;
-                rules.Text = text.Length == 0 ? "~$*" : text + Environment.NewLine + "~$*";
+                if (AppendOfficeExclusion(rules.Text) is { } updated) rules.Text = updated;
             })));
+    }
+
+    // すでに登録済みの場合は null を返し、編集中の空白や改行を変更しない。
+    internal static string? AppendOfficeExclusion(string? input)
+    {
+        var text = input?.TrimEnd() ?? "";
+        if (text.Split('\n').Any(x => x.Trim() == "~$*")) return null;
+        return text.Length == 0 ? "~$*" : text + Environment.NewLine + "~$*";
     }
 
     private static TextBlock SettingLabel(string text) => new() { Text = text, VerticalAlignment = VerticalAlignment.Center };
