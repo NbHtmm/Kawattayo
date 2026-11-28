@@ -336,6 +336,29 @@ public sealed class CheckpointsTests
     }
 
 
+    [Fact]
+    public void Collect_DistinguishesSameTreeFromParentsSiblingsAndAnotherDrive()
+    {
+        var downloads = new CopySpy();
+        var service = new Checkpoints(new MemoryRepository(), new ScriptedScanner(), downloads, TimeProvider.System);
+        const string root = @"C:\fixture\session";
+        var point = new CheckpointInfo("id", "baseline", root, true, [], DateTimeOffset.UnixEpoch);
+        var changes = new[] { new CheckpointDifference(Path.Combine("logs", "日報.txt"), DifferenceKind.Added, new(1, 2, 3)) };
+
+        // 保存先が同じフォルダまたはその配下なら拒否し、親・別名の兄弟・別のドライブなら許可する。
+        foreach (string rejected in new[] { root, root.ToUpperInvariant(), Path.Combine(root, "export") })
+        {
+            Assert.Throws<IOException>(() => service.Collect(point, changes, rejected, CancellationToken.None));
+            Assert.Null(downloads.Output);
+        }
+        foreach (string allowed in new[] { @"C:\fixture", @"C:\fixture\session-export", @"D:\fixture\session" })
+        {
+            Assert.Empty(service.Collect(point, changes, allowed, CancellationToken.None));
+            Assert.Equal(allowed, downloads.Output);
+            Assert.Equal(Path.Combine(root, "logs", "日報.txt"), Assert.Single(downloads.Requests).Source);
+        }
+    }
+
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
