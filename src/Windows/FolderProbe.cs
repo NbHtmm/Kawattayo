@@ -9,11 +9,16 @@ internal static class FolderProbe
     private const int EntryLimit = 50_000; //!< 一回の列挙で保持できる項目数の上限。
 
     /// @brief 入力から観測値または保存状態を読み込む。
-    public static FolderResult Read(string root, bool recursive, Func<string, bool>? exclude = null, CancellationToken cancellation = default)
+    public static FolderResult Read(string root, bool recursive, Func<string, bool>? exclude = null, CancellationToken cancellation = default) =>
+        ReadInventory(root, recursive, exclude, cancellation, FileProbe.ListDirectory);
+
+    // 列挙先を差し替え、通信断と正常な空フォルダをファイルサーバーなしで区別できるようにする。
+    internal static FolderResult ReadInventory(string root, bool recursive, Func<string, bool>? exclude, CancellationToken cancellation,
+        Func<string, int, CancellationToken, List<FileProbe.DirectoryEntry>> enumerate)
     {
         try
         {
-            return new(TakeInventory(root, recursive, exclude, cancellation));
+            return new(TakeInventory(root, recursive, exclude, cancellation, enumerate: enumerate));
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {
@@ -23,7 +28,8 @@ internal static class FolderProbe
     }
 
     /// @brief 監視範囲を走査し比較用辞書を構築する。
-    private static Dictionary<string, Fingerprint> TakeInventory(string root, bool recursive, Func<string, bool>? exclude, CancellationToken cancellation, Action<string>? onEnumerate = null)
+    internal static Dictionary<string, Fingerprint> TakeInventory(string root, bool recursive, Func<string, bool>? exclude, CancellationToken cancellation,
+        Func<string, int, CancellationToken, List<FileProbe.DirectoryEntry>> enumerate, Action<string>? onEnumerate = null)
     {
         var files = new Dictionary<string, Fingerprint>(StringComparer.OrdinalIgnoreCase);
         // 深いフォルダでも呼び出しスタックを消費せず、親の検索を閉じてから子を開く。
@@ -35,7 +41,7 @@ internal static class FolderProbe
             var directory = Path.Combine(root, relative);
             cancellation.ThrowIfCancellationRequested();
             onEnumerate?.Invoke(directory);
-            foreach (var entry in FileProbe.ListDirectory(directory, EntryLimit - visited, cancellation))
+            foreach (var entry in enumerate(directory, EntryLimit - visited, cancellation))
             {
                 visited++;
                 cancellation.ThrowIfCancellationRequested();
@@ -55,6 +61,8 @@ internal static class FolderProbe
                 }
             }
         }
+        // 空の一覧を待っている間の中断も、正常な空フォルダとして返さない。
+        cancellation.ThrowIfCancellationRequested();
         return files;
     }
 
@@ -95,7 +103,7 @@ internal static class FolderProbe
                 {
                     RemoveTree(relative);
                     if (recursive)
-                        foreach (var (child,value) in TakeInventory(path,true,exclude,cancellation,onEnumerate))
+                        foreach (var (child,value) in TakeInventory(path, true, exclude, cancellation, FileProbe.ListDirectory, onEnumerate))
                             files[Path.Combine(relative,child)] = value;
                     covered.Add(relative);
                 }
