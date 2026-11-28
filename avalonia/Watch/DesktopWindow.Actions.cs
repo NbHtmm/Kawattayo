@@ -58,7 +58,7 @@ internal sealed partial class DesktopWindow
     }
 
     // 確認開始後に差し替わった未読は残す。ファイルを開く待ち時間中にも照会は続く。
-    private static Action CaptureAcknowledgement(Row row)
+    internal static Action CaptureAcknowledgement(Row row)
     {
         if (row.Target is not { } target) return () => { };
         if (row.Change is { } change) return () => target.AcknowledgeFile(change);
