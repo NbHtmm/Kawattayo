@@ -28,7 +28,7 @@ Windowsから実行する。UTには.NET 10 SDKと、初回のNuGet復元また�
 
 `function-patterns.csv` は宣言・パターンID・期待結果・TRX上のテスト名を1行ずつ記録する。Theoryでも件数で代用せず、指定した入力行が実際に合格したことを照合する。`set_reviewed=yes` は、その関数の仕様に照らして正常・異常・境界・意味のある条件の組み合わせをレビューし、必要なパターンを列挙し終えた場合に限る。単にテストに紐づいた関数やSCTに対応するだけの関数は網羅に数えない。
 
-通常のUT実行は `function-pattern-audit.csv` に現時点の不足を記録する。網羅完了の検査はリポジトリルートで `powershell -NoProfile -ExecutionPolicy Bypass -File test\UT\run.ps1 -RequireAllPatterns` を実行する。未レビュー・未登録・結果不足が一つでも残れば終了コードは非0。これは仕様をレビューした台帳と試験結果の照合であり、機械的に全入力を証明するものではない。
+通常のUT実行は `function-pattern-audit.csv` に現時点の不足を記録する。網羅完了の検査はリポジトリルートで `test\run_ut.bat -RequireAllPatterns` を実行する。未レビュー・未登録・結果不足が一つでも残れば終了コードは非0。これは仕様をレビューした台帳と試験結果の照合であり、機械的に全入力を証明するものではない。
 
 ### 全関数を管理する次の段階
 
