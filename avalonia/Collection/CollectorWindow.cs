@@ -34,7 +34,16 @@ internal sealed class CollectorWindow : Window
             if (icon is not null) Icon = new WindowIcon(icon);
         Width = 820; Height = 630; MinWidth = 480; MinHeight = 460;
         create = Command("チェックポイントを作成", Create);
-        compare = Command("比較", Compare);
+        compare = Command("比較", () => Run(stop => Compare(
+            saved.SelectedItem as CheckpointInfo, ClearPreview,
+            (id, token) => Task.Run(() => checkpoints.Compare(id, token), token),
+            () => (saved.SelectedItem as CheckpointInfo)?.Id,
+            (info, changes, message) =>
+            {
+                preview = info;
+                results.ItemsSource = changes;
+                status.Text = message;
+            }, stop)));
         collect = Command("選択分をダウンロード…", Collect);
         reload = Command("一覧を再読込", async () => await Run(stop => Reload(stop)));
         cancel = Command("中止", () => { work?.Cancel(); return Task.CompletedTask; });
@@ -88,22 +97,25 @@ internal sealed class CollectorWindow : Window
         await Reload(stop, value.Id);
     });
 
-    private Task Compare() => Run(async stop =>
+    internal static async Task Compare(CheckpointInfo? item, Action clearPreview,
+        Func<string, CancellationToken, Task<(CheckpointInfo Info, CheckpointDifference[] Changes)>> compare,
+        Func<string?> currentId, Action<CheckpointInfo, CheckpointDifference[], string> publish, CancellationToken stop)
     {
-        if (saved.SelectedItem is not CheckpointInfo item) return;
-        ClearPreview();
-        var result = await Task.Run(() => checkpoints.Compare(item.Id, stop), stop);
-        if ((saved.SelectedItem as CheckpointInfo)?.Id != item.Id) return;
-        preview = result.Info;
-        results.ItemsSource = result.Changes;
+        if (item is null) return;
+        stop.ThrowIfCancellationRequested();
+        clearPreview();
+        var result = await compare(item.Id, stop);
+        // 比較自体が完了していても、結果を画面へ反映する前の中止は有効。
+        stop.ThrowIfCancellationRequested();
+        if (currentId() != item.Id) return;
         int unconfirmed = result.Changes.Count(x => x.Kind == DifferenceKind.Unconfirmed);
-        status.Text = $"差分・確認不能：{result.Changes.Length:N0}件（確認不能 {unconfirmed:N0}件）";
-    });
+        publish(result.Info, result.Changes, $"差分・確認不能：{result.Changes.Length:N0}件（確認不能 {unconfirmed:N0}件）");
+    }
 
     private Task Collect() => Run(async stop =>
     {
         if (preview is not { } info) return;
-        var selected = SelectedChanges();
+        var selected = SelectedChanges(results.SelectedItems);
         var output = await CollectorExportSelection.ResolveDestination(info, selected.Length,
             () => preview, () => PickFolder("保存先を選択"), stop);
         if (output is null) return;
@@ -112,8 +124,8 @@ internal sealed class CollectorWindow : Window
             string.Join("\n", copies.Select(x => x.Saved ?? $"{x.Source}：{x.Error}"));
     });
 
-    private CheckpointDifference[] SelectedChanges() =>
-        results.SelectedItems?.OfType<CheckpointDifference>().Where(x => x.CanDownload).ToArray() ?? [];
+    internal static CheckpointDifference[] SelectedChanges(System.Collections.IEnumerable? selected) =>
+        selected?.OfType<CheckpointDifference>().Where(x => x.CanDownload).ToArray() ?? [];
 
     private async Task Reload(CancellationToken stop, string? select = null)
     {
@@ -149,7 +161,7 @@ internal sealed class CollectorWindow : Window
         bool idle = work is null;
         create.IsEnabled = reload.IsEnabled = saved.IsEnabled = idle;
         compare.IsEnabled = idle && saved.SelectedItem is CheckpointInfo;
-        collect.IsEnabled = idle && preview is not null && SelectedChanges().Length != 0;
+        collect.IsEnabled = idle && preview is not null && SelectedChanges(results.SelectedItems).Length != 0;
         cancel.IsEnabled = !idle;
     }
 
