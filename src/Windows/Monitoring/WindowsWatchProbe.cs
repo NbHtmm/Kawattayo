@@ -1,8 +1,20 @@
 namespace ShareFileWatch;
 
 // Win32 への照会と、ワーカー側で確定させる差分をまとめる。UIの状態は読み書きしない。
-internal sealed class WindowsWatchProbe(Func<string, bool> isInternalFile)
+internal sealed class WindowsWatchProbe(Func<string, bool> isInternalFile, WindowsWatchProbe.Backend? backend = null)
 {
+    private readonly Backend source = backend ?? Native;
+
+    // Scripts can inject observations; only this default backend touches the filesystem or wall clock.
+    internal sealed record Backend(Func<string, ProbeResult> SingleFile,
+        Func<string, bool, Func<string, bool>, CancellationToken, FolderResult> FullFolder,
+        Func<string, bool, Dictionary<string, Fingerprint>, string[], Func<string, bool>, CancellationToken, FolderResult> FolderDelta,
+        Func<string, long> DirectoryStamp, Func<DateTimeOffset> Now);
+
+    private static readonly Backend Native = new(FileProbe.Read, FolderProbe.Read,
+        static (root, recursive, baseline, paths, exclude, stop) => FolderProbe.ReadChanges(root, recursive, baseline, paths, exclude, stop),
+        static path => Directory.GetLastWriteTimeUtc(path).ToFileTimeUtc(), static () => DateTimeOffset.Now);
+
     internal WatchObservation Read(WatchScanRequest target, CancellationToken cancellation = default, Dictionary<string,Fingerprint>? baseline = null, string[]? paths = null, string[]? priorExclusions = null)
     {
         FolderResult? folder = null;
@@ -10,12 +22,12 @@ internal sealed class WindowsWatchProbe(Func<string, bool> isInternalFile)
         if (target.IsFolder)
         {
             bool Excluded(string path) => FileExclusions.Matches(path,target.Exclusions) || isInternalFile(path);
-            folder = (paths != null && baseline != null ? FolderProbe.ReadChanges(target.Path,target.Recursive,baseline,paths,Excluded,cancellation)
-                : FolderProbe.Read(target.Path,target.Recursive,Excluded,cancellation)) with { Exclusions = target.Exclusions };
+            folder = (paths != null && baseline != null ? source.FolderDelta(target.Path,target.Recursive,baseline,paths,Excluded,cancellation)
+                : source.FullFolder(target.Path,target.Recursive,Excluded,cancellation)) with { Exclusions = target.Exclusions };
             // Saving the app's own cache changes its parent directory's timestamp.
             if (folder.Files != null && target.WatchDirectoryTime && !isInternalFile(Path.Combine(target.Path, AppDefaults.SettingsFileName)))
             {
-                try { folder = folder with { DirectoryStamp = Directory.GetLastWriteTimeUtc(target.Path).ToFileTimeUtc() }; }
+                try { folder = folder with { DirectoryStamp = source.DirectoryStamp(target.Path) }; }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { folder = new(null, ex.Message); }
             }
         }
@@ -25,9 +37,9 @@ internal sealed class WindowsWatchProbe(Func<string, bool> isInternalFile)
         }
         else
         {
-            file = FileProbe.Read(target.Path);
+            file = source.SingleFile(target.Path);
         }
-        var at = DateTimeOffset.Now;
+        var at = source.Now();
         List<FileChange>? prepared = null;
         if (baseline is not null && folder?.Files is { } files)
         {
