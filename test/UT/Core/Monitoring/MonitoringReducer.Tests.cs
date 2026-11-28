@@ -238,4 +238,68 @@ public sealed class MonitoringReducerTests
     {
         if (!condition) throw new InvalidOperationException(message);
     }
+
+    [Fact]
+    public void WatchBaselineCapture_UsesOnlyFieldsThatShouldTriggerPersistence()
+    {
+        var item = new WatchItem
+        {
+            Baseline = ProbeState.Found,
+            Inventory = new() { ["report.txt"] = new Fingerprint(1, 2, 3) },
+            DirectoryStamp = 5,
+            InventoryExclusions = ["*.bak"],
+            LatestFileWriteAt = DateTimeOffset.UnixEpoch,
+        };
+
+        var baseline = MonitoringReducer.WatchBaseline.Capture(item);
+        Assert.Equal(item.Baseline, baseline.State);
+        Assert.Same(item.Inventory, baseline.Files);
+        Assert.Equal(item.DirectoryStamp, baseline.Stamp);
+        Assert.Same(item.InventoryExclusions, baseline.Exclusions);
+        Assert.Equal(item.LatestFileWriteAt, baseline.LastWrite);
+
+        item.LastChecked = DateTimeOffset.UnixEpoch.AddSeconds(1);
+        item.Error = "temporary failure";
+        Assert.Equal(baseline, MonitoringReducer.WatchBaseline.Capture(item));
+    }
+
+    [Fact]
+    public void WatchBaselineEquals_AnySingleChangedComponentBreaksEquality()
+    {
+        var original = new MonitoringReducer.WatchBaseline(ProbeState.Found,
+            new() { ["report.txt"] = new Fingerprint(1, 2, 3) },
+            5, ["*.bak"], DateTimeOffset.UnixEpoch);
+        var variants = new[]
+        {
+            original with { State = ProbeState.Missing },
+            original with { Files = new(original.Files!) },
+            original with { Stamp = null },
+            original with { Exclusions = ["*.tmp"] },
+            original with { LastWrite = DateTimeOffset.UnixEpoch.AddTicks(1) },
+        };
+
+        foreach (var variant in variants)
+        {
+            Assert.False(original.Equals(variant));
+            Assert.False(variant.Equals(original));
+        }
+    }
+
+    [Fact]
+    public void WatchBaselineEqualityAndHash_IgnoreExclusionOrderCaseAndEmptyRepresentation()
+    {
+        var original = new MonitoringReducer.WatchBaseline(ProbeState.Found, new(), 5,
+            ["*.bak", "*.tmp"], DateTimeOffset.UnixEpoch);
+        var reworded = original with { Exclusions = ["*.TMP", "*.BAK"] };
+        var absent = original with { Exclusions = null };
+        var empty = original with { Exclusions = [] };
+
+        Assert.True(original.Equals(reworded));
+        Assert.True(absent.Equals(empty));
+        Assert.True(empty.Equals(absent));
+        Assert.Equal(original.GetHashCode(), reworded.GetHashCode());
+        Assert.Equal(absent.GetHashCode(), empty.GetHashCode());
+        Assert.Equal(original.GetHashCode(), absent.GetHashCode());
+    }
+
 }

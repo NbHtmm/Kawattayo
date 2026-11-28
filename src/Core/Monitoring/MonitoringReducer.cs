@@ -53,7 +53,7 @@ internal static class MonitoringReducer
         if (state.History.Count > AppDefaults.HistoryLimit) state.History.Dequeue();
     }
 
-    private readonly record struct WatchBaseline(ProbeState? State, Dictionary<string,Fingerprint>? Files, long? Stamp,
+    internal readonly record struct WatchBaseline(ProbeState? State, Dictionary<string,Fingerprint>? Files, long? Stamp,
         string[]? Exclusions, DateTimeOffset? LastWrite)
     {
         internal static WatchBaseline Capture(WatchItem item) =>
