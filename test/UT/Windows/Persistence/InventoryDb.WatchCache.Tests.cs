@@ -92,6 +92,67 @@ public sealed class InventoryDbWatchCacheTests
         Assert.False(CachedTarget.SamePending(a, b));
     }
 
+
+    [Fact]
+    public void Matches_ClearedRegistrationAndNullableFieldsRemainDistinguishable()
+    {
+        var item = new WatchItem { Path = @"C:\fixture\report.txt" };
+        var cached = CachedTarget.Capture(item, null);
+        Assert.Null(cached.SnapshotId);
+        Assert.Null(cached.Inventory);
+        Assert.Empty(cached.Pending!);
+        Assert.True(cached.Matches(item));
+        item.Path = @"C:\fixture\other.txt";
+        Assert.False(cached.Matches(item));
+        item.Path = cached.Path;
+        item.IsFolder = true;
+        Assert.False(cached.Matches(item));
+    }
+
+    [Fact]
+    public void SamePending_EmptyDictionariesMatchButDifferentKeysWithSameCountDoNot()
+    {
+        Assert.True(CachedTarget.SamePending(new(), new()));
+        var value = new FileChange("A.txt", "更新", s_time);
+        Assert.False(CachedTarget.SamePending(new() { ["A.txt"] = value }, new() { ["B.txt"] = value }));
+    }
+
+    [Theory]
+    [InlineData(-1L, true, false)]
+    [InlineData(0L, true, true)]
+    [InlineData(0L, false, false)]
+    [InlineData(1L, false, true)]
+    [InlineData(2147483647L, false, true)]
+    [InlineData(2147483648L, true, false)]
+    public void Count_EnforcesOptionalZeroAndIntRange(long value, bool allowZero, bool valid)
+    {
+        if (valid)
+            Assert.Equal((int)value, InventoryDb.Count(value, allowZero));
+        else
+            Assert.Throws<IOException>(() => InventoryDb.Count(value, allowZero));
+    }
+
+    [Fact]
+    public void Date_RoundTripsPrecisionAndOffsetOrUsesEmptyForMissing()
+    {
+        var precise = s_time.AddTicks(7);
+        string stored = InventoryDb.Date(precise);
+        Assert.Equal("2026-11-26T02:13:31.0000007+09:00", stored);
+        var read = Assert.IsType<DateTimeOffset>(InventoryDb.Date(stored));
+        Assert.True(precise.EqualsExact(read));
+        Assert.Equal("", InventoryDb.Date((DateTimeOffset?)null));
+        Assert.Null(InventoryDb.Date(""));
+    }
+
+    [Fact]
+    public void Date_EmptyIsNeverARequiredDateAndMalformedDateIsNotMissing()
+    {
+        Assert.Throws<IOException>(() => InventoryDb.Date("2026-02-30T02:13:31.0000000+09:00"));
+        Assert.Throws<IOException>(() => InventoryDb.RequiredDate(""));
+        Assert.Throws<IOException>(() => InventoryDb.RequiredDate("2026-11-26"));
+        Assert.True(s_time.EqualsExact(InventoryDb.RequiredDate("2026-11-26T02:13:31.0000000+09:00")));
+    }
+
     private static WatchItem Fixture() => new()
     {
         Path = @"C:\Fixture\計測",

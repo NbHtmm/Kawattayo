@@ -206,12 +206,12 @@ internal sealed partial class InventoryDb
         }
     }
 
-    private static int Count(long n, bool allowZero) => n >= (allowZero ? 0 : 1) && n <= int.MaxValue
+    internal static int Count(long n, bool allowZero) => n >= (allowZero ? 0 : 1) && n <= int.MaxValue
         ? (int)n : throw new IOException("キャッシュの件数が無効です。");
 
-    private static string Date(DateTimeOffset? value) => value?.ToString("O", CultureInfo.InvariantCulture) ?? "";
-    private static DateTimeOffset? Date(string value) => value.Length == 0 ? null : RequiredDate(value);
-    private static DateTimeOffset RequiredDate(string value) =>
+    internal static string Date(DateTimeOffset? value) => value?.ToString("O", CultureInfo.InvariantCulture) ?? "";
+    internal static DateTimeOffset? Date(string value) => value.Length == 0 ? null : RequiredDate(value);
+    internal static DateTimeOffset RequiredDate(string value) =>
         DateTimeOffset.TryParseExact(value, "O", CultureInfo.InvariantCulture, DateTimeStyles.None, out var at)
             ? at : throw new IOException("キャッシュの日時が無効です。");
 }
