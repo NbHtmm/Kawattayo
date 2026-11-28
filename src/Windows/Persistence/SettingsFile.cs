@@ -3,26 +3,27 @@ using System.Text.Json;
 namespace ShareFileWatch;
 
 // JSON設定の検証・旧バックアップからの復旧・一時ファイル経由の書き込みを担当する。
-internal sealed class SettingsFile(string file)
+internal sealed class SettingsFile(string file, SettingsFile.IStorage? backend = null)
 {
     private readonly string __backup = file + ".bak";
     private readonly string __temporary = file + ".tmp";
+    private readonly IStorage storage = backend ?? new DiskStorage();
     private string? __savedSettings;
 
     internal void EnsurePresent()
     {
-        if (!File.Exists(file) && !File.Exists(__backup)) WriteSettings(SerializeSettings(new()));
+        if (!storage.Exists(file) && !storage.Exists(__backup)) WriteSettings(SerializeSettings(new()));
     }
 
     internal void Save(AppState state)
     {
         var json = SerializeSettings(state);
-        if (json != __savedSettings || !File.Exists(file)) WriteSettings(json);
+        if (json != __savedSettings || !storage.Exists(file)) WriteSettings(json);
     }
 
     internal (AppState State, string? Warning) Load()
     {
-        if (!File.Exists(file) && !File.Exists(__backup)) return (new(), null);
+        if (!storage.Exists(file) && !storage.Exists(__backup)) return (new(), null);
         try
         {
             var state = ReadSettings(file);
@@ -44,14 +45,14 @@ internal sealed class SettingsFile(string file)
             throw new IOException("設定とバックアップを読み込めません。元のファイルは上書きしていません。",
                 new AggregateException(primaryError, backupError));
         }
-        if (File.Exists(file)) File.Move(file, file + ".broken-" + Guid.NewGuid().ToString("N"));
+        if (storage.Exists(file)) storage.Move(file, file + ".broken-" + Guid.NewGuid().ToString("N"));
         WriteSettings(SerializeSettings(state));
         return (state, "メインの設定を読み込めなかったため、バックアップから復元しました。");
     }
 
-    private static AppState ReadSettings(string path)
+    private AppState ReadSettings(string path)
     {
-        using var stream = File.OpenRead(path);
+        using var stream = storage.OpenRead(path);
         return DeserializeSettings(stream);
     }
 
@@ -89,22 +90,48 @@ internal sealed class SettingsFile(string file)
 
     private void WriteSettings(string settings)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        storage.CreateDirectory(Path.GetDirectoryName(file)!);
         try
         {
-            using (var stream = new FileStream(__temporary, FileMode.Create, FileAccess.Write, FileShare.None))
-            {
-                stream.Write(System.Text.Encoding.UTF8.GetBytes(settings));
-                stream.Flush(flushToDisk: true);
-            }
+            storage.WriteTemporary(__temporary, settings);
             // 書き換えは従来通り一括で行うが、新しいバックアップは作らない。
-            if (File.Exists(file)) File.Replace(__temporary, file, null, true);
-            else File.Move(__temporary, file);
+            if (storage.Exists(file)) storage.Replace(__temporary, file);
+            else storage.Move(__temporary, file);
             __savedSettings = settings;
         }
         finally
         {
-            if (File.Exists(__temporary)) File.Delete(__temporary);
+            if (storage.Exists(__temporary)) storage.Delete(__temporary);
         }
     }
+
+    // OS への書き出しだけを分離し、設定の判断やエラー回復は実際のアプリと同じコードで試験する。
+    internal interface IStorage
+    {
+        bool Exists(string path);
+        Stream OpenRead(string path);
+        void Move(string source, string destination);
+        void Replace(string source, string destination);
+        void CreateDirectory(string path);
+        void WriteTemporary(string path, string text);
+        void Delete(string path);
+    }
+
+    private sealed class DiskStorage : IStorage
+    {
+        public bool Exists(string path) => File.Exists(path);
+        public Stream OpenRead(string path) => File.OpenRead(path);
+        public void Move(string source, string destination) => File.Move(source, destination);
+        public void Replace(string source, string destination) => File.Replace(source, destination, null, true);
+        public void CreateDirectory(string path) => Directory.CreateDirectory(path);
+        public void Delete(string path) => File.Delete(path);
+
+        public void WriteTemporary(string path, string text)
+        {
+            using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+            stream.Write(System.Text.Encoding.UTF8.GetBytes(text));
+            stream.Flush(flushToDisk: true);
+        }
+    }
+
 }

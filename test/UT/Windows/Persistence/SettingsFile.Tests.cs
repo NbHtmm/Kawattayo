@@ -182,4 +182,229 @@ public sealed class SettingsFileTests
         Assert.Throws<NotSupportedException>(() => SettingsFile.DeserializeSettings(stream));
     }
 
+
+    private const string s_primary = @"C:\fixture\settings.json";
+    private const string s_backup = s_primary + ".bak";
+    private const string s_temp = s_primary + ".tmp";
+
+    [Fact]
+    public void EnsurePresent_OnlyCreatesDefaultsWhenNeitherPrimaryNorBackupExists()
+    {
+        var disk = new MemoryStorage();
+        var settings = new SettingsFile(s_primary, disk);
+        settings.EnsurePresent();
+        Assert.Equal(new AppState().PollSeconds, settings.Load().State.PollSeconds);
+        Assert.Equal(new[] { "stage", "move" }, disk.Writes);
+        Assert.False(disk.Data.ContainsKey(s_backup));
+        Assert.False(disk.Data.ContainsKey(s_temp));
+
+        settings.EnsurePresent();
+        Assert.Equal(2, disk.Writes.Count);
+        var backupOnly = new MemoryStorage();
+        backupOnly.Data[s_backup] = SettingsFile.SerializeSettings(new AppState { PollSeconds = 42 });
+        new SettingsFile(s_primary, backupOnly).EnsurePresent();
+        Assert.False(backupOnly.Data.ContainsKey(s_primary));
+        Assert.Empty(backupOnly.Writes);
+    }
+
+    [Fact]
+    public void Save_SkipsIdenticalStateButRecreatesMissingFileAndReplacesChangedSettings()
+    {
+        var disk = new MemoryStorage();
+        var settings = new SettingsFile(s_primary, disk);
+        var state = new AppState { PollSeconds = 17 };
+        settings.Save(state);
+        settings.Save(state);
+        Assert.Equal(new[] { "stage", "move" }, disk.Writes);
+
+        state.PollSeconds = 20;
+        settings.Save(state);
+        Assert.Equal(new[] { "stage", "move", "stage", "replace" }, disk.Writes);
+        Assert.Equal(20, settings.Load().State.PollSeconds);
+        Assert.False(disk.Data.ContainsKey(s_backup));
+
+        disk.Data.Remove(s_primary);
+        settings.Save(state);
+        Assert.Equal(new[] { "stage", "move" }, disk.Writes.TakeLast(2));
+        Assert.Equal(20, settings.Load().State.PollSeconds);
+    }
+
+    [Fact]
+    public void Save_DraftOrCommitFailureRetainsPriorSettingsAndAllowsTheSameUpdateToBeRetried()
+    {
+        foreach (string stage in new[] { "stage", "replace" })
+        {
+            var disk = new MemoryStorage();
+            var settings = new SettingsFile(s_primary, disk);
+            settings.Save(new AppState { PollSeconds = 17 });
+            var newer = new AppState { PollSeconds = 22 };
+            disk.FailWrite = stage;
+            Assert.Throws<IOException>(() => settings.Save(newer));
+            Assert.False(disk.Data.ContainsKey(s_temp));
+            Assert.Equal(17, settings.Load().State.PollSeconds);
+            Assert.False(disk.Data.ContainsKey(s_backup));
+
+            disk.FailWrite = null;
+            settings.Save(newer);
+            Assert.Equal(22, settings.Load().State.PollSeconds);
+        }
+    }
+
+    [Fact]
+    public void Load_WhenMissingReturnsDefaultsButWhenHealthyUsesPrimaryWithoutReadingBackup()
+    {
+        var disk = new MemoryStorage();
+        var settings = new SettingsFile(s_primary, disk);
+        var (empty, warning) = settings.Load();
+        Assert.Equal(new AppState().PollSeconds, empty.PollSeconds);
+        Assert.Null(warning);
+        Assert.Empty(disk.Opened);
+        Assert.Empty(disk.Writes);
+
+        disk.Data[s_primary] = SettingsFile.SerializeSettings(new AppState { PollSeconds = 31 });
+        disk.Data[s_backup] = "not json";
+        var (state, normal) = settings.Load();
+        settings.Save(state);
+        Assert.Equal(31, state.PollSeconds);
+        Assert.Null(normal);
+        Assert.Equal(s_primary, Assert.Single(disk.Opened));
+        Assert.Empty(disk.Writes);
+    }
+
+    [Fact]
+    public void Load_RecoversFromBadOrMissingPrimaryAndRetainsAnExistingBrokenCopy()
+    {
+        foreach (bool primaryPresent in new[] { false, true })
+        {
+            var disk = new MemoryStorage();
+            if (primaryPresent) disk.Data[s_primary] = "{malformed";
+            var backup = SettingsFile.SerializeSettings(new AppState { PollSeconds = 42 });
+            disk.Data[s_backup] = backup;
+
+            var (state, warning) = new SettingsFile(s_primary, disk).Load();
+            Assert.Equal(42, state.PollSeconds);
+            Assert.NotNull(warning);
+            Assert.Equal(backup, disk.Data[s_primary]);
+            Assert.Equal(backup, disk.Data[s_backup]);
+            Assert.False(disk.Data.ContainsKey(s_temp));
+            var broken = disk.Data.Keys.Where(path => path.StartsWith(s_primary + ".broken-", StringComparison.Ordinal));
+            if (primaryPresent) Assert.Equal("{malformed", disk.Data[Assert.Single(broken)]);
+            else Assert.Empty(broken);
+        }
+    }
+
+    [Fact]
+    public void Load_ReportsBothFailuresAndDoesNotOverwriteSettingsWhenRecoveryIsImpossible()
+    {
+        var disk = new MemoryStorage();
+        disk.Data[s_primary] = "{invalid";
+        disk.OpenFailures[s_backup] = new UnauthorizedAccessException("fixture access denied");
+        var first = Assert.Throws<IOException>(() => new SettingsFile(s_primary, disk).Load());
+        var problems = Assert.IsType<AggregateException>(first.InnerException);
+        Assert.Collection(problems.InnerExceptions,
+            ex => Assert.IsAssignableFrom<JsonException>(ex),
+            ex => Assert.Equal("fixture access denied", ex.Message));
+        Assert.Empty(disk.Writes);
+        Assert.Equal("{invalid", disk.Data[s_primary]);
+    }
+
+    [Fact]
+    public void Load_UnsupportedSchemaDoesNotFallBackToAnOlderBackup()
+    {
+        var disk = new MemoryStorage();
+        const string unsupported = """{"Version":2,"Items":[]}""";
+        disk.Data[s_primary] = unsupported;
+        disk.Data[s_backup] = SettingsFile.SerializeSettings(new AppState());
+        Assert.Throws<NotSupportedException>(() => new SettingsFile(s_primary, disk).Load());
+        Assert.Equal(s_primary, Assert.Single(disk.Opened));
+        Assert.Empty(disk.Writes);
+        Assert.Equal(unsupported, disk.Data[s_primary]);
+    }
+
+
+    [Fact]
+    public void Load_WhenPublishingRecoveredSettingsFailsKeepsTheBackupAndTheOriginalBytes()
+    {
+        var disk = new MemoryStorage { FailWrite = "move-into-primary" };
+        const string broken = "{unreadable";
+        disk.Data[s_primary] = broken;
+        var backup = SettingsFile.SerializeSettings(new AppState { PollSeconds = 42 });
+        disk.Data[s_backup] = backup;
+
+        Assert.Throws<IOException>(() => new SettingsFile(s_primary, disk).Load());
+
+        Assert.Equal(backup, disk.Data[s_backup]);
+        Assert.False(disk.Data.ContainsKey(s_primary));
+        Assert.False(disk.Data.ContainsKey(s_temp));
+        string quarantined = Assert.Single(disk.Data.Keys, path => path.StartsWith(s_primary + ".broken-", StringComparison.Ordinal));
+        Assert.Equal(broken, disk.Data[quarantined]);
+    }
+
+
+
+    [Fact]
+    public void Save_DirectoryCreationFailureDoesNotCreateADraftOrChangeThePrimary()
+    {
+        var disk = new MemoryStorage { FailWrite = "directory" };
+        string prior = SettingsFile.SerializeSettings(new AppState { PollSeconds = 18 });
+        disk.Data[s_primary] = prior;
+        var settings = new SettingsFile(s_primary, disk);
+        Assert.Throws<UnauthorizedAccessException>(() => settings.Save(new AppState { PollSeconds = 45 }));
+        Assert.Empty(disk.Writes);
+        Assert.False(disk.Data.ContainsKey(s_temp));
+        Assert.Equal(prior, disk.Data[s_primary]);
+    }
+
+
+    private sealed class MemoryStorage : SettingsFile.IStorage
+    {
+        internal readonly Dictionary<string, string> Data = [];
+        internal readonly Dictionary<string, Exception> OpenFailures = [];
+        internal readonly List<string> Writes = [];
+        internal readonly List<string> Opened = [];
+        internal string? FailWrite;
+
+        public bool Exists(string path) => Data.ContainsKey(path);
+
+        public Stream OpenRead(string path)
+        {
+            Opened.Add(path);
+            if (OpenFailures.TryGetValue(path, out var error)) throw error;
+            if (!Data.TryGetValue(path, out string? text)) throw new FileNotFoundException(path);
+            return new MemoryStream(System.Text.Encoding.UTF8.GetBytes(text));
+        }
+
+        public void CreateDirectory(string path)
+        {
+            Assert.Equal(Path.GetDirectoryName(s_primary), path);
+            if (FailWrite == "directory") throw new UnauthorizedAccessException("fixture cannot create directory");
+        }
+
+        public void WriteTemporary(string path, string text)
+        {
+            Writes.Add("stage");
+            Data[path] = text;
+            if (FailWrite == "stage") throw new IOException("fixture stage failure");
+        }
+
+        public void Replace(string source, string destination)
+        {
+            Writes.Add("replace");
+            if (FailWrite == "replace") throw new IOException("fixture replace failure");
+            Assert.True(Data.ContainsKey(destination));
+            Data[destination] = Data[source];
+            Data.Remove(source);
+        }
+
+        public void Move(string source, string destination)
+        {
+            Writes.Add("move");
+            if (FailWrite == "move-into-primary" && destination == s_primary) throw new IOException("fixture move failure");
+            Data.Add(destination, Data[source]);
+            Data.Remove(source);
+        }
+
+        public void Delete(string path) { Writes.Add("delete"); Data.Remove(path); }
+    }
+
 }
