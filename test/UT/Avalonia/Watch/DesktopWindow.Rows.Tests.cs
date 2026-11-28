@@ -5,6 +5,75 @@ public sealed class DesktopWindowRowsTests
 {
     private static readonly DateTimeOffset s_now = new(2026, 4, 5, 12, 30, 0, TimeSpan.FromHours(9));
 
+    [Fact]
+    public void BuildChildren_GroupsNamesIgnoringCaseAndProjectsLatestTimeCountsAndBranchKeys()
+    {
+        var target = new WatchItem { Path = @"C:\trial", IsFolder = true };
+        var a = new FileChange(@"logs\A.txt", "更新", s_now.AddMinutes(-1));
+        var b = new FileChange(@"LOGS\b.txt", "追加", s_now);
+        var direct = new FileChange("Direct.csv", "消失", s_now, Count: 4);
+        var expanded = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"root|logs\" };
+        Assert.Empty(DesktopWindow.BuildChildren(target, "root", "", 1, [], expanded));
+        var rows = DesktopWindow.BuildChildren(target, "root", "", 1, [a, b, direct], expanded);
+
+        var leaf = Assert.Single(rows, x => !x.Row.Folder);
+        Assert.Equal(("root|Direct.csv", "Direct.csv", 1, 4), (leaf.Row.Key, leaf.Row.Name, leaf.Row.Depth, leaf.Row.Count!.Value));
+        Assert.Same(direct, leaf.Row.Change);
+        Assert.Equal(@"C:\trial\Direct.csv", leaf.Row.Path);
+        var branch = Assert.Single(rows, x => x.Row.Folder);
+        Assert.Equal(@"root|logs\", branch.Row.Branch);
+        Assert.Equal(@"logs\", branch.Prefix);
+        Assert.True(branch.Row.Expanded);
+        Assert.Equal(s_now, branch.Row.At);
+        Assert.Equal(2, branch.Row.Count);
+        Assert.Equal(new[] { a, b }, branch.Changes);
+    }
+
+    [Fact]
+    public void AppendExpandedRows_ListsOnlyExpandedDescendantsAndKeepsSiblingSortIndependentOfDepth()
+    {
+        var target = new WatchItem { Path = @"C:\trial", IsFolder = true };
+        var changes = new[]
+        {
+            new FileChange(@"Logs\deep\c.txt", "更新", s_now),
+            new FileChange(@"Logs\a.txt", "更新", s_now),
+            new FileChange("A-root.txt", "更新", s_now)
+        };
+        var rows = new List<DesktopWindow.Row>();
+        var expanded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        DesktopWindow.AppendExpandedRows(rows, target, "root", changes, expanded, 0, false);
+        Assert.Equal(new[] { ("A-root.txt", 1), ("Logs", 1) }, rows.Select(x => (x.Name, x.Depth)));
+        Assert.False(rows[1].Expanded);
+        rows.Clear();
+        expanded.Add(@"root|logs\");
+        expanded.Add(@"root|logs\deep\");
+        DesktopWindow.AppendExpandedRows(rows, target, "root", changes, expanded, 0, true);
+        Assert.Equal(new[] { ("Logs", 1), ("deep", 2), ("c.txt", 3), ("a.txt", 2), ("A-root.txt", 1) },
+            rows.Select(x => (x.Name, x.Depth)));
+    }
+
+    [Fact]
+    public void AppendExpandedRows_HandlesLongChainsAndAnEmptySelectionWithoutInventingRows()
+    {
+        var target = new WatchItem { Path = @"C:\trial", IsFolder = true };
+        const int depth = 150;
+        var expanded = new HashSet<string>();
+        string relative = "";
+        for (int i = 0; i < depth; i++)
+        {
+            relative += @"d\";
+            expanded.Add("root|" + relative);
+        }
+        var rows = new List<DesktopWindow.Row>();
+        DesktopWindow.AppendExpandedRows(rows, target, "root", [], expanded, 0, false);
+        Assert.Empty(rows);
+        DesktopWindow.AppendExpandedRows(rows, target, "root", [new(relative + "leaf.txt", "更新", s_now)], expanded, 0, false);
+        Assert.Equal(depth + 1, rows.Count);
+        Assert.All(rows.Take(depth), row => Assert.True(row.Folder && row.Expanded));
+        Assert.Equal(depth + 1, rows[^1].Depth);
+        Assert.Equal("leaf.txt", rows[^1].Name);
+    }
+
     [Theory]
     [InlineData(0, "A", "B")]
     [InlineData(1, "B", "A")]

@@ -136,7 +136,7 @@ internal sealed partial class DesktopWindow
             rows.Add(root with { Branch = branches ? root.Key : null, Expanded = open });
             if (!branches || !open) continue;
             var children = target.PendingFiles.Values.Where(c => c.Relative != ".");
-            AppendExpandedRows(rows, target, root.Key, children);
+            AppendExpandedRows(rows, target, root.Key, children, __expanded, __inboxSort, __inboxReverse);
         }
         Assign(__inbox, rows);
         __emptyInbox.IsVisible = rows.Count == 0;
@@ -144,27 +144,29 @@ internal sealed partial class DesktopWindow
     }
 
     // 展開中の枝だけを深さ優先で投影する。長い階層でも呼び出しスタックを使わない。
-    private void AppendExpandedRows(List<Row> rows, WatchItem target, string root, IEnumerable<FileChange> changes)
+    internal static void AppendExpandedRows(List<Row> rows, WatchItem target, string root, IEnumerable<FileChange> changes,
+        IReadOnlySet<string> expanded, int column, bool reverse)
     {
         var queue = new Stack<InboxChild>();
-        PushSiblings(queue, BuildChildren(target, root, "", 1, changes));
+        PushSiblings(queue, BuildChildren(target, root, "", 1, changes, expanded), column, reverse);
         while (queue.TryPop(out var child))
         {
             rows.Add(child.Row);
             if (child.Row.Expanded && child.Changes is { } nested)
-                PushSiblings(queue, BuildChildren(target, root, child.Prefix, child.Row.Depth + 1, nested));
+                PushSiblings(queue, BuildChildren(target, root, child.Prefix, child.Row.Depth + 1, nested, expanded), column, reverse);
         }
     }
 
-    private void PushSiblings(Stack<InboxChild> queue, List<InboxChild> children)
+    internal static void PushSiblings(Stack<InboxChild> queue, List<InboxChild> children, int column, bool reverse)
     {
-        foreach (var child in Order(children, static c => c.Row, __inboxSort, __inboxReverse).Reverse())
+        foreach (var child in Order(children, static c => c.Row, column, reverse).Reverse())
             queue.Push(child);
     }
 
-    private sealed record InboxChild(Row Row, string Prefix = "", List<FileChange>? Changes = null);
+    internal sealed record InboxChild(Row Row, string Prefix = "", List<FileChange>? Changes = null);
 
-    private List<InboxChild> BuildChildren(WatchItem target, string root, string prefix, int depth, IEnumerable<FileChange> changes)
+    internal static List<InboxChild> BuildChildren(WatchItem target, string root, string prefix, int depth,
+        IEnumerable<FileChange> changes, IReadOnlySet<string> expanded)
     {
         var groups = new Dictionary<string, List<FileChange>>(StringComparer.OrdinalIgnoreCase);
         var siblings = new List<InboxChild>();
@@ -193,7 +195,7 @@ internal sealed partial class DesktopWindow
             var time = group.Max(x => x.DetectedAt);
             var row = new Row(branch, target, name, $"{group.Count:N0} ファイル  ｜  {Age(time)}", time,
                 group.Count, Path.Combine(target.Path, relative), Folder: true, Depth: depth, Branch: branch,
-                Expanded: __expanded.Contains(branch));
+                Expanded: expanded.Contains(branch));
             siblings.Add(new(row, next, group));
         }
         return siblings;
