@@ -296,6 +296,46 @@ public sealed class CheckpointsTests
         Assert.Null(downloads.Output);
     }
 
+
+    [Fact]
+    public void Collect_ReturnsTheSaversMixedOutcomesWithoutDroppingFailuresOrChangingOrder()
+    {
+        string root = Path.GetFullPath("source");
+        string output = Path.GetFullPath("output");
+        var point = new CheckpointInfo("id", "baseline", root, true, [], DateTimeOffset.UnixEpoch);
+        var expected = new[]
+        {
+            new DownloadResult(Path.Combine(root, "first.txt"), Path.Combine(output, "first.txt"), null),
+            new DownloadResult(Path.Combine(root, "second.txt"), null, "fixture changed while copying"),
+        };
+        var downloads = new CopySpy { BuildResponse = _ => expected };
+        var service = new Checkpoints(new MemoryRepository(), new ScriptedScanner(), downloads, TimeProvider.System);
+
+        var actual = service.Collect(point,
+            [new("first.txt", DifferenceKind.Added, new(1, 2, 3)),
+             new("removed.txt", DifferenceKind.Deleted, null),
+             new("second.txt", DifferenceKind.Updated, new(4, 5, 6))], output, CancellationToken.None);
+
+        Assert.Same(expected, actual);
+        Assert.Equal(new[] { "first.txt", "second.txt" }, downloads.Paths);
+    }
+
+    [Fact]
+    public void Collect_PropagatesASaverFailureInsteadOfReturningAnEmptySuccess()
+    {
+        var failure = new IOException("fixture output failure");
+        var downloads = new CopySpy { BuildResponse = _ => throw failure };
+        var service = new Checkpoints(new MemoryRepository(), new ScriptedScanner(), downloads, TimeProvider.System);
+        var point = new CheckpointInfo("id", "baseline", Path.GetFullPath("source"), true, [], DateTimeOffset.UnixEpoch);
+
+        var actual = Assert.Throws<IOException>(() => service.Collect(point,
+            [new("report.txt", DifferenceKind.Added, null)], Path.GetFullPath("output"), CancellationToken.None));
+
+        Assert.Same(failure, actual);
+        Assert.Equal("report.txt", Assert.Single(downloads.Requests).Relative);
+    }
+
+
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
@@ -340,13 +380,14 @@ public sealed class CheckpointsTests
         internal DownloadRequest[] Requests = [];
         internal string? Output;
         internal CancellationToken Stop;
+        internal Func<IReadOnlyList<DownloadRequest>, DownloadResult[]>? BuildResponse;
         public DownloadResult[] Save(string output, IReadOnlyList<DownloadRequest> requests, CancellationToken stop)
         {
             Requests = requests.ToArray();
             Output = output;
             Stop = stop;
             Paths = requests.Select(x => x.Relative).ToArray();
-            return [];
+            return BuildResponse?.Invoke(requests) ?? [];
         }
     }
 }
