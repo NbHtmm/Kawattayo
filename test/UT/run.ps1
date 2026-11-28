@@ -34,7 +34,7 @@ Push-Location $repo
 try {
     dotnet run --project test/tools/UtInventory -c Release -- (Join-Path $out 'source-map.csv') (Join-Path $out 'functions.csv') $repo
     if ($LASTEXITCODE -ne 0) { throw 'Failed to generate the source function inventory.' }
-    dotnet test test/UT/Kawattayo.Core.Tests.csproj -c Release -p:RestoreLockedMode=true -p:UseSharedCompilation=false --settings test/UT/coverage.runsettings --results-directory $out --logger 'trx;LogFileName=result.trx' --collect 'XPlat Code Coverage'
+    dotnet test test/UT/Kawattayo.Core.Tests.csproj -c Release -m:1 -p:RestoreLockedMode=true -p:UseSharedCompilation=false --settings test/UT/coverage.runsettings --results-directory $out --logger 'trx;LogFileName=result.trx' --collect 'XPlat Code Coverage'
     $status = $LASTEXITCODE
     $resultPath = Join-Path $out 'result.trx'
     if (Test-Path -LiteralPath $resultPath) {
