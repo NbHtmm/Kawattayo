@@ -73,11 +73,19 @@ internal sealed class TableRowSurface : Border
 
     private void Paint()
     {
-        var palette = ActualThemeVariant == ThemeVariant.Dark ? Dark : Light;
-        bool selected = _item?.IsSelected == true;
-        Background = selected ? palette.Selected : _item?.IsPointerOver == true ? palette.Hover
-            : _index >= 0 && (_index & 1) != 0 ? palette.Odd : palette.Even;
-        BorderBrush = palette.Separator;
-        _accent.Background = selected ? palette.Accent : Brushes.Transparent;
+        var paint = ResolvePaint(_index, _item?.IsSelected == true, _item?.IsPointerOver == true,
+            ActualThemeVariant == ThemeVariant.Dark);
+        Background = paint.Background;
+        BorderBrush = paint.Separator;
+        _accent.Background = paint.Accent;
+    }
+
+    // 選択をホバーや縞模様より優先する。仮想化でインデックスが未確定なら偶数行の色を使う。
+    internal static (IBrush Background, IBrush Separator, IBrush Accent) ResolvePaint(int index, bool selected, bool hovered, bool dark)
+    {
+        var palette = dark ? Dark : Light;
+        var background = selected ? palette.Selected : hovered ? palette.Hover
+            : index >= 0 && (index & 1) != 0 ? palette.Odd : palette.Even;
+        return (background, palette.Separator, selected ? palette.Accent : Brushes.Transparent);
     }
 }
