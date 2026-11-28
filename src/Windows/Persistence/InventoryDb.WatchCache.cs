@@ -81,7 +81,21 @@ internal sealed partial class InventoryDb
         return targets;
     }
 
-    internal void ReadObservations(CachedTarget target, WatchItem item)
+    internal void ReadObservations(CachedTarget target, WatchItem item) =>
+        ApplyObservations(target, item, ReadPendingChanges, Read);
+
+    private IEnumerable<FileChange> ReadPendingChanges(Guid id)
+    {
+        using var rows = new Statement(this, "SELECT path,kind,detected_at,modified_at,count FROM pending_changes WHERE watch_id=?");
+        rows.Text(1, id.ToString("N"));
+        while (rows.Next())
+            yield return new(rows.Text(0), rows.Text(1), RequiredDate(rows.Text(2)), Date(rows.Text(3)),
+                Count(rows.Number(4), allowZero: false));
+    }
+
+    // 未読の復元と、今の監視範囲で比較基準を再利用できるかの判定は分けて扱う。
+    internal static void ApplyObservations(CachedTarget target, WatchItem item,
+        Func<Guid, IEnumerable<FileChange>> readPending, Func<string, Dictionary<string, Fingerprint>> readSnapshot)
     {
         var data = target.Observation;
         item.LastChanged = data.LastChanged;
@@ -89,17 +103,10 @@ internal sealed partial class InventoryDb
         item.LastModified = data.LastModified;
         item.LastChange = data.LastChange;
         item.Unread = data.Unread;
-        using (var rows = new Statement(this, "SELECT path,kind,detected_at,modified_at,count FROM pending_changes WHERE watch_id=?"))
-        {
-            rows.Text(1, target.Id.ToString("N"));
-            while (rows.Next())
-            {
-                var path = rows.Text(0);
-                var change = new FileChange(path, rows.Text(1), RequiredDate(rows.Text(2)), Date(rows.Text(3)),
-                    Count(rows.Number(4), allowZero: false));
-                if (!item.PendingFiles.TryAdd(path, change)) throw new IOException("キャッシュの未読パスが重複しています。");
-            }
-        }
+        foreach (var change in readPending(target.Id))
+            if (!item.PendingFiles.TryAdd(change.Relative, change))
+                throw new IOException("キャッシュの未読パスが重複しています。");
+
         // 設定だけが復元された場合、別の再帰範囲で作られた一覧を比較に使わない。
         if (item.Recursive != target.Recursive) return;
         item.Baseline = data.Baseline;
@@ -107,7 +114,7 @@ internal sealed partial class InventoryDb
         item.DirectoryStamp = data.DirectoryStamp;
         item.InventoryExclusions = FileExclusions.Normalize(data.Scope.Split('\n'));
         item.LatestFileWriteAt = data.LatestFileWriteAt;
-        item.Inventory = target.SnapshotId is { } id ? Read(id) : null;
+        item.Inventory = target.SnapshotId is { } id ? readSnapshot(id) : null;
     }
 
     public void WriteTarget(CachedTarget target, CachedTarget? prior)

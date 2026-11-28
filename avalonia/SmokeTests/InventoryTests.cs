@@ -48,6 +48,8 @@ internal static class InventoryTests
             restored.Inventory![child].Bytes == 31 && restored.PendingFiles[child].Count == 1 && restored.Unread == 1,
             "SQLite round-trips inventory, unread and history");
 
+        CheckRestoreAfterRegistrationChange(db, item, child);
+
         item.Acknowledge();
         store.Save(state);
         Check(File.ReadAllBytes(json).SequenceEqual(settingsBefore) && !File.Exists(backup),
@@ -86,6 +88,27 @@ internal static class InventoryTests
             "missing SQLite starts fresh without losing settings");
     }
 
+
+    private static void CheckRestoreAfterRegistrationChange(string database, WatchItem original, string child)
+    {
+        var shallow = new WatchItem
+        {
+            Id = original.Id, Path = original.Path, IsFolder = true, Recursive = false
+        };
+        var moved = new WatchItem
+        {
+            Id = original.Id, Path = Path.Combine(original.Path, "different-root"), IsFolder = true, Recursive = true
+        };
+
+        new MonitoringCache(database).Restore(new AppState { Items = [shallow] });
+        Check(shallow.Unread == 1 && shallow.PendingFiles.ContainsKey(child) &&
+            shallow.Baseline is null && shallow.Inventory is null,
+            "Changing recursion keeps unread detail but discards the previous comparison baseline");
+
+        new MonitoringCache(database).Restore(new AppState { Items = [moved] });
+        Check(moved.Unread == 0 && moved.PendingFiles.Count == 0 && moved.Inventory is null,
+            "Reusing an ID at a different path does not bring old observations into that registration");
+    }
 
     internal static void VerifyBulkFileRemoval(string root)
     {

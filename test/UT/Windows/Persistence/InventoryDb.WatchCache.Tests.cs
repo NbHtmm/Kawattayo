@@ -153,6 +153,112 @@ public sealed class InventoryDbWatchCacheTests
         Assert.True(s_time.EqualsExact(InventoryDb.RequiredDate("2026-11-26T02:13:31.0000000+09:00")));
     }
 
+    [Fact]
+    public void ApplyObservations_ExactScopeRestoresUnreadAndComparisonBaseline()
+    {
+        var original = RestoreFixture();
+        var cached = CachedTarget.Capture(original, "snapshot-01");
+        var restored = new WatchItem { Recursive = true };
+        InventoryDb.ApplyObservations(cached, restored, actualId =>
+        {
+            Assert.Equal(cached.Id, actualId);
+            return original.PendingFiles.Values;
+        }, actualSnapshot =>
+        {
+            Assert.Equal("snapshot-01", actualSnapshot);
+            return original.Inventory!;
+        });
+
+        Assert.Equal(cached.Observation, CachedObservation.Capture(restored));
+        Assert.Equal(original.PendingFiles["A.txt"], Assert.Single(restored.PendingFiles).Value);
+        Assert.Same(original.Inventory, restored.Inventory);
+    }
+
+    [Fact]
+    public void ApplyObservations_ChangedScopeRetainsUnreadButDoesNotLoadOldBaseline()
+    {
+        var original = RestoreFixture();
+        var cached = CachedTarget.Capture(original, "snapshot-01");
+        var restored = new WatchItem { Recursive = false };
+        InventoryDb.ApplyObservations(cached, restored, _ => original.PendingFiles.Values,
+            _ => throw new InvalidOperationException("The previous scope must not load an inventory."));
+
+        Assert.Equal((original.Unread, original.LastChange, original.LastChanged, original.AcknowledgedAt, original.LastModified),
+            (restored.Unread, restored.LastChange, restored.LastChanged, restored.AcknowledgedAt, restored.LastModified));
+        Assert.Equal(original.PendingFiles["A.txt"], Assert.Single(restored.PendingFiles).Value);
+        Assert.Null(restored.Baseline);
+        Assert.Null(restored.Fingerprint);
+        Assert.Null(restored.DirectoryStamp);
+        Assert.Null(restored.Inventory);
+        Assert.Null(restored.InventoryExclusions);
+        Assert.Null(restored.LatestFileWriteAt);
+    }
+
+    [Fact]
+    public void ApplyObservations_NoSavedInventoryClearsPreviousInventoryWithoutLoading()
+    {
+        var original = RestoreFixture();
+        var restored = Fixture();
+        InventoryDb.ApplyObservations(CachedTarget.Capture(original, null), restored, _ => [],
+            _ => throw new InvalidOperationException("There is no snapshot to load."));
+
+        Assert.Equal(ProbeState.Found, restored.Baseline);
+        Assert.Null(restored.Inventory);
+    }
+
+    [Fact]
+    public void ApplyObservations_DuplicateUnreadPathFailsBeforeLoadingSnapshot()
+    {
+        var original = RestoreFixture();
+        var pending = original.PendingFiles["A.txt"];
+        var restored = new WatchItem { Recursive = true };
+        Assert.Throws<IOException>(() => InventoryDb.ApplyObservations(
+            CachedTarget.Capture(original, "snapshot-01"), restored,
+            _ => [pending, pending with { Relative = "a.txt" }],
+            _ => throw new InvalidOperationException("Invalid pending rows must stop restoration.")));
+    }
+
+    [Fact]
+    public void ApplyObservations_ReportsSnapshotLoadFailureWithoutReplacingInventory()
+    {
+        var original = RestoreFixture();
+        var restored = new WatchItem { Recursive = true };
+        var failure = new IOException("missing snapshot");
+        Assert.Same(failure, Assert.Throws<IOException>(() => InventoryDb.ApplyObservations(
+            CachedTarget.Capture(original, "snapshot-01"), restored, _ => original.PendingFiles.Values,
+            _ => throw failure)));
+        Assert.Null(restored.Inventory);
+    }
+
+    [Fact]
+    public void ApplyObservations_PendingReadFailureStopsBeforeLoadingSnapshot()
+    {
+        var original = RestoreFixture();
+        var restored = new WatchItem { Recursive = true };
+        var failure = new IOException("cannot read pending changes");
+        Assert.Same(failure, Assert.Throws<IOException>(() => InventoryDb.ApplyObservations(
+            CachedTarget.Capture(original, "snapshot-01"), restored, _ => throw failure,
+            _ => throw new InvalidOperationException("Unread entries must be read before the snapshot."))));
+        Assert.Null(restored.Baseline);
+        Assert.Null(restored.Inventory);
+    }
+
+    private static WatchItem RestoreFixture()
+    {
+        var item = Fixture();
+        item.Id = Guid.NewGuid();
+        item.LastChange = "updated";
+        item.LastChanged = s_time;
+        item.AcknowledgedAt = s_time.AddHours(-1);
+        item.LastModified = s_time.AddHours(-2);
+        item.Baseline = ProbeState.Found;
+        item.Fingerprint = new(1, 2, 3);
+        item.DirectoryStamp = 55;
+        item.InventoryExclusions = FileExclusions.Normalize(["*.tmp", "~$*"]);
+        item.LatestFileWriteAt = s_time.AddHours(-3);
+        return item;
+    }
+
     private static WatchItem Fixture() => new()
     {
         Path = @"C:\Fixture\計測",
