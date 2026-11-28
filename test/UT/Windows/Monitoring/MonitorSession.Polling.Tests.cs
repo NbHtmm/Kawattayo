@@ -559,6 +559,88 @@ public sealed class MonitorSessionPollingTests
         await fixture.Session.Close();
     }
 
+    [Fact]
+    public async Task FlushScanUpdates_BatchesChangedRowsAndHandsSubscribersAStableAlertSnapshot()
+    {
+        var fixture = new MonitorFixture();
+        var first = fixture.AddFile("a.txt");
+        var second = fixture.AddFile("b.txt");
+        fixture.State.WaitForStable = false;
+        var observed = new Fingerprint(10, 1, 10);
+        fixture.Observe = (request, _) => new(request.Id, request.Revision, new(ProbeState.Found, observed),
+            null, DateTimeOffset.UnixEpoch, null);
+        var batches = new List<IReadOnlyList<MonitorAlert>>();
+        var rows = new List<bool>();
+        fixture.Session.Alerts += batches.Add;
+        fixture.Session.RowsChanged += rows.Add;
+        await fixture.Session.Scan();
+        Assert.Empty(batches);
+        Assert.DoesNotContain(true, rows);
+
+        observed = observed with { Bytes = 20 };
+        rows.Clear();
+        await fixture.Session.Scan();
+        Assert.Equal(new[] { false, false, true }, rows);
+        var batch = Assert.Single(batches);
+        Assert.Equal(new[] { first.Path, second.Path }, batch.Select(alert => alert.Path));
+        Assert.False(fixture.Flush.IsEnabled);
+        int rowCount = rows.Count;
+        fixture.Flush.Fire();
+        Assert.Equal(rowCount, rows.Count);
+        Assert.Single(batches);
+        Assert.Equal(2, batch.Count);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task FlushScanUpdates_UnchangedScanRetriesAnOutstandingSaveFailure()
+    {
+        var fixture = new MonitorFixture();
+        fixture.AddFile("report.txt");
+        fixture.SaveError = new IOException("fixture write failure");
+        var failed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recovered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stop = TestContext.Current.CancellationToken;
+        fixture.Session.ProgressChanged += () =>
+        {
+            if (fixture.Session.Status.Contains("fixture write failure", StringComparison.Ordinal))
+                failed.TrySetResult();
+            else if (!fixture.Saves.IsEmpty)
+                recovered.TrySetResult();
+        };
+        fixture.Observe = (request, _) => new(request.Id, request.Revision, new(ProbeState.Found, new(10, 1, 10)),
+            null, DateTimeOffset.UnixEpoch, null);
+        await fixture.Session.Scan();
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5), stop);
+        Assert.Empty(fixture.Saves);
+
+        fixture.SaveError = null;
+        await fixture.Session.Scan();
+        // Close could force a retry itself; verify the repair already happened before closing.
+        await recovered.Task.WaitAsync(TimeSpan.FromSeconds(5), stop);
+        Assert.Null(fixture.Saves.Single().Items.Single().Error);
+        Assert.DoesNotContain("fixture write failure", fixture.Session.Status);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task FlushScanUpdates_EmptyTicksAndTicksAfterCloseDoNotPublishOrSave()
+    {
+        var fixture = new MonitorFixture();
+        fixture.Session.RowsChanged += _ => throw new InvalidOperationException("Unexpected row publication");
+        fixture.Session.Alerts += _ => throw new InvalidOperationException("Unexpected alert publication");
+        fixture.Flush.Start();
+        fixture.Flush.Fire();
+        Assert.False(fixture.Flush.IsEnabled);
+        Assert.Empty(fixture.Saves);
+
+        await fixture.Session.Close();
+        fixture.Flush.Start();
+        fixture.Flush.Fire();
+        Assert.False(fixture.Flush.IsEnabled);
+        Assert.Empty(fixture.Saves);
+    }
+
     private static MonitorFixture FolderFixture(FakeFeed feed, TimeProvider? clock = null)
     {
         var fixture = new MonitorFixture(clock, (_, _) => feed);

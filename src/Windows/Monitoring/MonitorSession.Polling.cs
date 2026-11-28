@@ -29,8 +29,11 @@ internal sealed partial class MonitorSession
         }
         RowsChanged?.Invoke(__inboxPending);
         __inboxPending = false;
-        if (__alertsPending.Count != 0) Alerts?.Invoke(__alertsPending);
+        if (__alertsPending.Count == 0) return;
+        // 通知の受け手に、直後に空になる内部バッファを渡さない。
+        var batch = __alertsPending.ToArray();
         __alertsPending.Clear();
+        Alerts?.Invoke(batch);
     }
 
 
