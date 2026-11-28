@@ -35,7 +35,8 @@ internal sealed partial class MonitorSession
         void Retire();
     }
 
-    internal sealed class ChangeFeed(string directory, bool recursive, Func<string,bool> internalFile) : IChangeFeed
+    internal sealed class ChangeFeed(string directory, bool recursive, Func<string,bool> internalFile,
+        Func<Task<(IDisposable? Directory, IDisposable? Parent)>>? openWatchers = null) : IChangeFeed
     {
         public ConcurrentDictionary<string,long> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
         private long version;
@@ -46,7 +47,7 @@ internal sealed partial class MonitorSession
             lock (journal) return (version, since < discarded ? null : journal.Where(p => p.Value > since).Select(p => p.Key).ToArray());
         }
         public long Stamp(bool folder,string path) => folder ? Interlocked.Read(ref version) : Names.GetValueOrDefault(path);
-        private FileSystemWatcher? Watcher;
+        private IDisposable? Watcher;
         public bool Available => Watcher != null
 #if KAWATTAYO_SMOKE
             || Synthetic
@@ -55,7 +56,7 @@ internal sealed partial class MonitorSession
 #if KAWATTAYO_SMOKE
         public bool Synthetic;
 #endif
-        private FileSystemWatcher? parentWatcher;
+        private IDisposable? parentWatcher;
         public volatile bool Failed;
         public int Epoch;
         bool IChangeFeed.Failed => Failed;
@@ -84,35 +85,39 @@ internal sealed partial class MonitorSession
             if (Failed && Watcher != null) { CloseWatchers(); Epoch++; }
             if (Watcher != null || now < retry || retired) return;
             Failed = false; retry = now + 5000;
-            var pair = await Task.Run<(FileSystemWatcher?, FileSystemWatcher?)>(() => {
-                FileSystemWatcher? w = null;
-                FileSystemWatcher? parent = null;
-                try
-                {
-                    // Arm the parent first: replacing the directory can leave its old handle alive.
-                    var normalized = Path.TrimEndingDirectorySeparator(directory);
-                    if (Path.GetDirectoryName(normalized) is string parentPath)
-                    {
-                        parent = new FileSystemWatcher(parentPath, Path.GetFileName(normalized)) { NotifyFilter = NotifyFilters.DirectoryName };
-                        parent.Created += (_,_) => Failed = true;
-                        parent.Deleted += (_,_) => Failed = true;
-                        parent.Renamed += (_,_) => Failed = true;
-                        parent.Error += (_,_) => Failed = true;
-                        parent.EnableRaisingEvents = true;
-                    }
-                    w = new FileSystemWatcher(directory) { IncludeSubdirectories = recursive,
-                        NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime };
-                    w.Created += (_,e) => Signal(e.FullPath); w.Changed += (_,e) => Signal(e.FullPath);
-                    w.Deleted += (_,e) => Signal(e.FullPath); w.Renamed += (_,e) => { Signal(e.OldFullPath); Signal(e.FullPath); };
-                    w.Error += (_,_) => Failed = true;
-                    w.EnableRaisingEvents = true; return (w,parent);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception)
-                { w?.Dispose(); parent?.Dispose(); return (null,null); }
-            });
+            var pair = await (openWatchers?.Invoke() ?? Task.Run(OpenNativeWatchers));
             (Watcher,parentWatcher) = pair;
             if (retired) CloseWatchers(); else if (Watcher != null) Epoch++;
         }
+
+        private (IDisposable? Directory, IDisposable? Parent) OpenNativeWatchers()
+        {
+            FileSystemWatcher? w = null;
+            FileSystemWatcher? parent = null;
+            try
+            {
+                // Arm the parent first: replacing the directory can leave its old handle alive.
+                var normalized = Path.TrimEndingDirectorySeparator(directory);
+                if (Path.GetDirectoryName(normalized) is string parentPath)
+                {
+                    parent = new FileSystemWatcher(parentPath, Path.GetFileName(normalized)) { NotifyFilter = NotifyFilters.DirectoryName };
+                    parent.Created += (_,_) => Failed = true;
+                    parent.Deleted += (_,_) => Failed = true;
+                    parent.Renamed += (_,_) => Failed = true;
+                    parent.Error += (_,_) => Failed = true;
+                    parent.EnableRaisingEvents = true;
+                }
+                w = new FileSystemWatcher(directory) { IncludeSubdirectories = recursive,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime };
+                w.Created += (_,e) => Signal(e.FullPath); w.Changed += (_,e) => Signal(e.FullPath);
+                w.Deleted += (_,e) => Signal(e.FullPath); w.Renamed += (_,e) => { Signal(e.OldFullPath); Signal(e.FullPath); };
+                w.Error += (_,_) => Failed = true;
+                w.EnableRaisingEvents = true; return (w,parent);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception)
+            { w?.Dispose(); parent?.Dispose(); return (null,null); }
+        }
+
         private void CloseWatchers() { parentWatcher?.Dispose(); parentWatcher = null; Watcher?.Dispose(); Watcher = null; }
         public void Retire() { retired = true; CloseWatchers(); }
     }

@@ -95,4 +95,98 @@ public sealed class MonitorSessionQuietTests
         Assert.False(feed.Names.ContainsKey(other));
     }
 
+    [Fact]
+    public async Task Start_LateRetiredPairIsDisposedWithoutTouchingReplacementForTheSameDirectory()
+    {
+        const string directory = @"C:\test";
+        const string file = @"C:\test\report.txt";
+        var gate = new TaskCompletionSource<(IDisposable?, IDisposable?)>();
+        var oldMain = new Subscription();
+        var oldParent = new Subscription();
+        var newMain = new Subscription();
+        var newParent = new Subscription();
+        int oldAttempts = 0;
+        var old = new MonitorSession.ChangeFeed(directory, false, _ => false, () =>
+        {
+            oldAttempts++;
+            return gate.Task;
+        });
+        var replacement = new MonitorSession.ChangeFeed(directory, false, _ => false,
+            () => Task.FromResult<(IDisposable?, IDisposable?)>((newMain, newParent)));
+
+        var start = old.Start(0);
+        Assert.False(start.IsCompleted);
+        Assert.False(old.Available);
+        old.Retire();
+        await replacement.Start(0);
+        replacement.Signal(file);
+
+        gate.SetResult((oldMain, oldParent));
+        await start;
+        await old.Start(10000);
+        old.Retire();
+
+        Assert.Equal(1, oldAttempts);
+        Assert.False(old.Available);
+        Assert.Equal(0, old.Epoch);
+        Assert.Equal(1, oldMain.Disposals);
+        Assert.Equal(1, oldParent.Disposals);
+        Assert.True(replacement.Available);
+        Assert.Equal(1, replacement.Epoch);
+        Assert.Equal(0, newMain.Disposals);
+        Assert.Equal(0, newParent.Disposals);
+        Assert.Equal(file, Assert.Single(replacement.Snapshot(0).Paths!));
+        replacement.Retire();
+        Assert.False(replacement.Available);
+        Assert.Equal(1, newMain.Disposals);
+        Assert.Equal(1, newParent.Disposals);
+    }
+
+    [Fact]
+    public async Task Start_UnavailableAndFailedFeedsRetryAtTheExactDeadline()
+    {
+        var first = new Subscription();
+        var firstParent = new Subscription();
+        var second = new Subscription();
+        int attempts = 0;
+        var feed = new MonitorSession.ChangeFeed(@"C:\test", false, _ => false, () =>
+            Task.FromResult<(IDisposable?, IDisposable?)>((++attempts) switch
+            {
+                1 => (null, null),
+                2 => (first, firstParent),
+                _ => (second, null)
+            }));
+
+        await feed.Start(10);
+        Assert.False(feed.Available);
+        Assert.Equal(0, feed.Epoch);
+        await feed.Start(5009);
+        Assert.Equal(1, attempts);
+        await feed.Start(5010);
+        Assert.True(feed.Available);
+        Assert.Equal(1, feed.Epoch);
+        await feed.Start(5011);
+        Assert.Equal(2, attempts);
+
+        feed.Failed = true;
+        await feed.Start(10009);
+        Assert.False(feed.Available);
+        Assert.Equal(2, feed.Epoch);
+        Assert.Equal(1, first.Disposals);
+        Assert.Equal(1, firstParent.Disposals);
+        Assert.Equal(2, attempts);
+        await feed.Start(10010);
+        Assert.True(feed.Available);
+        Assert.False(feed.Failed);
+        Assert.Equal(3, feed.Epoch);
+        Assert.Equal(3, attempts);
+        feed.Retire();
+        Assert.Equal(1, second.Disposals);
+    }
+
+    private sealed class Subscription : IDisposable
+    {
+        internal int Disposals { get; private set; }
+        public void Dispose() => Disposals++;
+    }
 }
