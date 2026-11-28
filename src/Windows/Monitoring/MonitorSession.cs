@@ -3,9 +3,8 @@ namespace ShareFileWatch;
 // 巡回・表示への通知・保存要求を調整する。観測の反映はUIスレッドに限定する。
 internal sealed partial class MonitorSession
 {
-    private readonly StateStore __store;
+    private readonly Boundaries __boundaries;
     private readonly AppState __state;
-    private readonly WindowsWatchProbe __probe;
     private readonly SnapshotWriter __writer;
     private readonly IMonitorTimer __pollTimer;
     private readonly IMonitorTimer __scanFlush;
@@ -15,23 +14,34 @@ internal sealed partial class MonitorSession
     private readonly long __clockOrigin;
 
     internal MonitorSession(StateStore store, IMonitorTimer pollTimer, IMonitorTimer flushTimer, TimeProvider? clock = null)
+        : this(new Boundaries(store.Load, store.Save, store.IsInternalFile, Directory.Exists, File.Exists,
+            new WindowsWatchProbe(store.IsInternalFile).Read, () => new UpdateHooks(store.StorageDirectory)), pollTimer, flushTimer, clock)
     {
-        __store = store;
+    }
+
+    // The session owns orchestration. Tests use substitutes for disk, native reads, and external hooks.
+    internal sealed record Boundaries(Func<(AppState State, string? Warning)> Load, Action<AppState> Save,
+        Func<string, bool> IsInternalFile, Func<string, bool> DirectoryExists, Func<string, bool> FileExists,
+        Func<WatchScanRequest, CancellationToken, Dictionary<string, Fingerprint>?, string[]?, string[]?, WatchObservation> Read,
+        Func<IUpdateHooks> CreateHooks);
+
+    internal MonitorSession(Boundaries boundaries, IMonitorTimer pollTimer, IMonitorTimer flushTimer, TimeProvider? clock = null)
+    {
+        __boundaries = boundaries;
         __clock = clock ?? TimeProvider.System;
         __clockOrigin = __clock.GetTimestamp();
         __pollTimer = pollTimer;
         __scanFlush = flushTimer;
         __scanFlush.Interval = TimeSpan.FromMilliseconds(150);
-        __probe = new(store.IsInternalFile);
-        (__state, StartupWarning) = store.Load();
-        Hooks = new UpdateHooks(store.StorageDirectory);
-        __writer = new(__state.CaptureForSave, __store.Save, UpdateStatus);
+        (__state, StartupWarning) = boundaries.Load();
+        Hooks = boundaries.CreateHooks();
+        __writer = new(__state.CaptureForSave, boundaries.Save, UpdateStatus);
         __pollTimer.Elapsed += async () => await Scan(automatic: true);
         __scanFlush.Elapsed += () => FlushScanUpdates();
     }
 
     internal AppState State => __state;
-    internal UpdateHooks Hooks { get; }
+    internal IUpdateHooks Hooks { get; }
     internal string? StartupWarning { get; }
     internal event Action<bool>? RowsChanged;
     internal event Action? ProgressChanged;

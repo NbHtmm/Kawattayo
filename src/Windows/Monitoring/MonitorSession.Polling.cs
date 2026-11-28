@@ -158,7 +158,7 @@ internal sealed partial class MonitorSession
 #if KAWATTAYO_SMOKE
             ScanModeForTest?.Invoke(paths is null);
 #endif
-            var result = await Task.Run(() => __probe.Read(target.Request, cancellation, baseline, paths, priorExclusions));
+            var result = await Task.Run(() => __boundaries.Read(target.Request, cancellation, baseline, paths, priorExclusions));
 #if KAWATTAYO_SMOKE
             BeforeApplyForTest?.Invoke();
 #endif

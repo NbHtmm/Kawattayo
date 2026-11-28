@@ -27,9 +27,9 @@ internal sealed partial class MonitorSession
         try
         {
             string path = FileProbe.NormalizeFolder(input);
-            if (__store.IsInternalFile(path)) return (input, false, "自身の設定・キャッシュは監視できません");
-            if (Directory.Exists(path)) return (path, true, null);
-            if (File.Exists(path)) return (FileProbe.Normalize(path), false, null);
+            if (__boundaries.IsInternalFile(path)) return (input, false, "自身の設定・キャッシュは監視できません");
+            if (__boundaries.DirectoryExists(path)) return (path, true, null);
+            if (__boundaries.FileExists(path)) return (FileProbe.Normalize(path), false, null);
             return (input, false, "ファイルやフォルダが見つかりません");
         }
         catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)

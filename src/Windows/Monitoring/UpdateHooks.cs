@@ -14,7 +14,16 @@ internal sealed record HookRule(string Target, string Executable, string[] Argum
 [JsonSerializable(typeof(Dictionary<Guid, HookRule>))]
 internal sealed partial class HookJsonContext : JsonSerializerContext;
 
-internal sealed class UpdateHooks : IDisposable
+internal interface IUpdateHooks : IDisposable
+{
+    HookRule? Get(Guid id, string target);
+    string Status(Guid id);
+    void Set(Guid id, HookRule? rule);
+    void Disable(Guid id);
+    void Enqueue(Guid id, HookRule rule, string path, Fingerprint expected);
+}
+
+internal sealed class UpdateHooks : IUpdateHooks
 {
     private readonly string file;
     private readonly ConcurrentDictionary<Guid, HookRule> rules;
@@ -42,11 +51,11 @@ internal sealed class UpdateHooks : IDisposable
         runner = Task.Run(() => Run(stop.Token));
     }
 
-    internal HookRule? Get(Guid id, string target) =>
+    public HookRule? Get(Guid id, string target) =>
         rules.TryGetValue(id, out var rule) && string.Equals(rule.Target, target, StringComparison.OrdinalIgnoreCase) ? rule : null;
-    internal string Status(Guid id) => results.GetValueOrDefault(id) ?? loadError ?? "実行履歴はありません。";
+    public string Status(Guid id) => results.GetValueOrDefault(id) ?? loadError ?? "実行履歴はありません。";
 
-    internal void Set(Guid id, HookRule? rule)
+    public void Set(Guid id, HookRule? rule)
     {
         if (loadError is not null) throw new IOException(loadError);
         if (rule is not null) ValidateExecutable(rule.Executable);
@@ -67,13 +76,13 @@ internal sealed class UpdateHooks : IDisposable
     }
 
     // 登録解除後には待機中の実行も取り消す。GUID は新規登録と共有しない。
-    internal void Disable(Guid id)
+    public void Disable(Guid id)
     {
         rules.TryRemove(id, out _);
         results.TryRemove(id, out _);
     }
 
-    internal void Enqueue(Guid id, HookRule rule, string path, Fingerprint expected)
+    public void Enqueue(Guid id, HookRule rule, string path, Fingerprint expected)
     {
         var job = new Job(id, rule, path, expected, Environment.TickCount64 + rule.WaitSeconds * 1000L);
         if (!queue.Writer.TryWrite(job)) results[id] = "フックの待ち行列が満杯のため、一部実行を見送りました。";

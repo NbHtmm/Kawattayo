@@ -4,6 +4,127 @@ using Xunit;
 public sealed class MonitorSessionPollingTests
 {
     [Fact]
+    public async Task Scan_EmptyPausedExcludedOrClosedSessionDoesNotQuery()
+    {
+        var fixture = new MonitorFixture();
+        await fixture.Session.Scan();
+        Assert.False(fixture.Poll.IsEnabled);
+        var file = fixture.AddFile("skip.tmp");
+        fixture.State.Paused = true;
+        await fixture.Session.Scan();
+        Assert.False(fixture.Poll.IsEnabled);
+        Assert.Null(file.LastChecked);
+        fixture.State.Paused = false;
+        fixture.State.ExcludedFilePatterns = ["*.tmp"];
+        await fixture.Session.Scan();
+        Assert.True(fixture.Poll.IsEnabled);
+        Assert.Null(file.LastChecked);
+        await fixture.Session.Close();
+        await fixture.Session.Scan();
+        Assert.False(fixture.Poll.IsEnabled);
+        Assert.Null(file.LastChecked);
+    }
+
+    [Fact]
+    public async Task Scan_FirstReadEstablishesBaselineAndSecondReadPublishesUnreadAlertAndHookOnce()
+    {
+        DateTimeOffset at = new(2026, 3, 1, 13, 2, 5, TimeSpan.FromHours(9));
+        var fixture = new MonitorFixture();
+        var file = fixture.AddFile("report.txt");
+        fixture.State.WaitForStable = false;
+        var hook = new HookRule(file.Path, "not started", [], 0);
+        fixture.Hooks.Rule = hook;
+        Fingerprint observed = new(at.ToFileTime(), 5, 2);
+        fixture.Observe = (q, _) => new(q.Id, q.Revision, new(ProbeState.Found, observed), null, at, null);
+        var alerts = new List<MonitorAlert>();
+        var rows = new List<bool>();
+        int progress = 0;
+        fixture.Session.Alerts += changes => alerts.AddRange(changes);
+        fixture.Session.RowsChanged += rows.Add;
+        fixture.Session.ProgressChanged += () => progress++;
+        await fixture.Session.Scan();
+        Assert.Same(observed, file.Fingerprint);
+        Assert.Empty(alerts);
+        Assert.Empty(fixture.Hooks.Queued);
+        Assert.Equal(0, file.Unread);
+        Assert.Equal("最終巡回 13:02:05", fixture.Session.Status);
+
+        observed = observed with { Bytes = 30 };
+        await fixture.Session.Scan();
+        Assert.Equal(new MonitorAlert(file.Path, "report.txt：更新"), Assert.Single(alerts));
+        var queued = Assert.Single(fixture.Hooks.Queued);
+        Assert.Equal((file.Id, hook, file.Path, observed), queued);
+        Assert.Equal(1, file.Unread);
+        Assert.Contains(true, rows);
+        Assert.True(progress > 0);
+        Assert.Null(file.QueryStart);
+        Assert.NotNull(file.QueryMs);
+        Assert.False(file.QueryStopped);
+        fixture.Flush.Fire();
+        Assert.Single(alerts);
+
+        await fixture.Session.Scan();
+        Assert.Single(alerts);
+        Assert.Single(fixture.Hooks.Queued);
+        await fixture.Session.Close();
+        Assert.Equal(1, fixture.Saves.Last().Items.Single().Unread);
+    }
+
+    [Fact]
+    public async Task Scan_PauseCancelsRunningReadAndStaleReturnCannotChangeBaseline()
+    {
+        var fixture = new MonitorFixture();
+        var file = fixture.AddFile("trial.txt");
+        var first = new Fingerprint(20, 1, 4);
+        var latest = new Fingerprint(21, 1, 5);
+        file.Baseline = ProbeState.Found;
+        file.Fingerprint = first;
+        var started = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim(false);
+        var stop = TestContext.Current.CancellationToken;
+        fixture.Observe = (q, token) =>
+        {
+            started.SetResult(token);
+            Assert.True(release.Wait(TimeSpan.FromSeconds(5), stop), "Scan worker was not released");
+            return new(q.Id, q.Revision, new(ProbeState.Found, latest), null, DateTimeOffset.UnixEpoch, null);
+        };
+        var pending = fixture.Session.Scan();
+        try
+        {
+            var scanToken = await started.Task.WaitAsync(TimeSpan.FromSeconds(5), stop);
+            await fixture.Session.Scan(); // The already-running root is not queued a second time.
+            fixture.Session.PauseOrResume();
+            Assert.True(scanToken.IsCancellationRequested);
+        }
+        finally { release.Set(); }
+        await pending;
+        Assert.Same(first, file.Fingerprint);
+        Assert.Equal(0, file.Unread);
+        Assert.True(file.QueryStopped);
+        Assert.Null(file.QueryStart);
+        Assert.False(fixture.Poll.IsEnabled);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Scan_ReportsUnexpectedProbeErrorAndAllowsTheSameRootToRecover()
+    {
+        var fixture = new MonitorFixture();
+        var file = fixture.AddFile("trial.txt");
+        fixture.Observe = (_, _) => throw new InvalidOperationException("probe fixture");
+        await fixture.Session.Scan();
+        Assert.Equal("照会に失敗：probe fixture", fixture.Session.Status);
+        Assert.Null(file.LastChecked);
+        Assert.Null(file.QueryStart);
+        var now = new DateTimeOffset(2026, 1, 1, 11, 32, 49, TimeSpan.Zero);
+        fixture.Observe = (q, _) => new(q.Id, q.Revision, new(ProbeState.Missing), null, now, null);
+        await fixture.Session.Scan();
+        Assert.Equal(now, file.LastChecked);
+        Assert.Equal("最終巡回 11:32:49", fixture.Session.Status);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
     public void ClaimPollRoots_CaseInsensitiveDriveAndShareGroupsKeepTargetOrder()
     {
         string[] paths = [@"C:\first.txt", @"\\nas\logs\a.log", @"c:\folder\second.txt",

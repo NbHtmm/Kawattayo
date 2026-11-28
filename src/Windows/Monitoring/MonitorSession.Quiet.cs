@@ -121,7 +121,7 @@ internal sealed partial class MonitorSession
                 if (slots + cost > SubscriptionLimit) continue;
                 slots += cost; keep.Add(key);
             }
-            if (!__feeds.TryGetValue(key,out var feed)) __feeds[key] = feed = new(dir,recursive,__store.IsInternalFile);
+            if (!__feeds.TryGetValue(key,out var feed)) __feeds[key] = feed = new(dir,recursive,__boundaries.IsInternalFile);
 #if KAWATTAYO_SMOKE
             feed.Synthetic = UseSyntheticFeedForTest;
 #endif
