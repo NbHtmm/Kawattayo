@@ -11,13 +11,13 @@ namespace ShareFileWatch;
 internal sealed partial class DesktopWindow
 {
     private static Row[] Selected(ListBox list) => list.SelectedItems?.OfType<Row>().ToArray() ?? [];
-    private static string Label(WatchItem item) => string.IsNullOrWhiteSpace(item.DisplayName)
+    internal static string Label(WatchItem item) => string.IsNullOrWhiteSpace(item.DisplayName)
         ? Leaf(item.Path) : item.DisplayName;
-    private static string Leaf(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } name ? name : path;
-    private static string Age(DateTimeOffset? at)
+    internal static string Leaf(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } name ? name : path;
+    internal static string Age(DateTimeOffset? at, DateTimeOffset? asOf = null)
     {
         if (at is null) return "—";
-        var d = DateTimeOffset.Now - at.Value;
+        var d = (asOf ?? DateTimeOffset.Now) - at.Value;
         if (d < TimeSpan.FromMinutes(1)) return "たった今";
         if (d < TimeSpan.FromHours(1)) return $"{(int)d.TotalMinutes}分前";
         if (d < TimeSpan.FromDays(1)) return $"{(int)d.TotalHours}時間前";
