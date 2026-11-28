@@ -31,7 +31,7 @@ cli/Program.cs,"Program.Options.Options(string[] args, string[] fields, string[]
 "avalonia/Collection/CheckpointLabels.cs","ShareFileWatch.CheckpointLabels.Describe(CheckpointInfo point)","CheckpointLabelsTests","Describe_CheckpointIncludesItsNameLocalTimeAndRoot","1"
 "avalonia/Collection/CheckpointLabels.cs","ShareFileWatch.CheckpointLabels.Describe(CheckpointDifference difference)","CheckpointLabelsTests","Describe_MapsEachDifferenceKindAndUsesRelativePath","4"
 "avalonia/Collection/CheckpointLabels.cs","ShareFileWatch.CheckpointLabels.Describe(CheckpointDifference difference)","CheckpointLabelsTests","Describe_EmptyPathUsesRootCaptionAndIncludesDiagnostic","1"
-"src/Core/Collection/CheckpointContracts.cs","ShareFileWatch.CheckpointDifference.CanDownload.get","CheckpointContractsTests","CanDownload_OnlyReadableAdditionsAndUpdatesCanBeCollected","4"
+"src/Core/Collection/CheckpointContracts.cs","ShareFileWatch.CheckpointDifference.CanDownload.get","CheckpointContractsTests","CanDownload_OnlyReadableAdditionsAndUpdatesCanBeCollected","5"
 "src/Core/Collection/Checkpoints.cs","ShareFileWatch.Checkpoints.List()","CheckpointsTests","Create_StoresTrimmedNameAndFrozenScanPolicy","1"
 "src/Core/Collection/Checkpoints.cs","ShareFileWatch.Checkpoints.Create(string name, string root, bool recursive, string exclusions, CancellationToken stop)","CheckpointsTests","Create_RejectsEmptyNamesAndDoesNotPersist","2"
 "src/Core/Collection/Checkpoints.cs","ShareFileWatch.Checkpoints.Create(string name, string root, bool recursive, string exclusions, CancellationToken stop)","CheckpointsTests","Create_StoresTrimmedNameAndFrozenScanPolicy","1"

@@ -8,6 +8,7 @@ public sealed class CheckpointContractsTests
     [InlineData("Updated", true)]
     [InlineData("Deleted", false)]
     [InlineData("Unconfirmed", false)]
+    [InlineData("99", false)]
     public void CanDownload_OnlyReadableAdditionsAndUpdatesCanBeCollected(string kind, bool expected)
     {
         var difference = new CheckpointDifference("test.txt", Enum.Parse<DifferenceKind>(kind), null);

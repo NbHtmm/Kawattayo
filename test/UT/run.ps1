@@ -1,4 +1,6 @@
-﻿. (Join-Path $PSScriptRoot 'BoundaryTrace.ps1')
+﻿param([switch]$RequireAllPatterns)
+. (Join-Path $PSScriptRoot 'PatternAudit.ps1')
+. (Join-Path $PSScriptRoot 'BoundaryTrace.ps1')
 . (Join-Path $PSScriptRoot '../SCT/CaseLedger.ps1')
 . (Join-Path $PSScriptRoot 'FunctionTrace.ps1')
 $ErrorActionPreference = 'Stop'
@@ -46,6 +48,7 @@ try {
             CaseLedger = Join-Path $PSScriptRoot '../SCT/CASES.md'
         }
         Write-UtFunctionTrace @trace
+        Write-UtPatternAudit -Trx $trx -Inventory $trace.Inventory -PatternLedger (Join-Path $PSScriptRoot 'function-patterns.csv') -Destination (Join-Path $out 'function-pattern-audit.csv') -RequireAllPatterns:$RequireAllPatterns
     }
     if ($status -eq 0) {
         if (!$trx) { throw 'UT result TRX missing.' }
