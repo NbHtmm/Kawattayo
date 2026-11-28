@@ -52,6 +52,12 @@ internal sealed class SettingsFile(string file)
     private static AppState ReadSettings(string path)
     {
         using var stream = File.OpenRead(path);
+        return DeserializeSettings(stream);
+    }
+
+    // ファイルを開く処理と分け、メモリ上の設定にも同じ読み取り・検証ルールを適用する。
+    internal static AppState DeserializeSettings(Stream stream)
+    {
         var data = JsonSerializer.Deserialize(stream, SettingsJsonContext.Default.AppState) ?? throw new JsonException();
         return ValidateSettings(data);
     }

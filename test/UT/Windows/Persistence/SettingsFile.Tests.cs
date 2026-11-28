@@ -148,4 +148,38 @@ public sealed class SettingsFileTests
         Assert.False(restored.WaitForStable);
     }
 
+
+    [Fact]
+    public void DeserializeSettings_ReadsAndValidatesFromTheStreamsCurrentPositionWithoutClosingIt()
+    {
+        const string prefix = "junk:";
+        const string json = """{"Version":1,"PollSeconds":1,"Items":[]}""";
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(prefix + json));
+        stream.Position = prefix.Length;
+
+        var state = SettingsFile.DeserializeSettings(stream);
+
+        Assert.Empty(state.Items);
+        Assert.Equal(5, state.PollSeconds);
+        Assert.True(stream.CanRead);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("null")]
+    [InlineData("{")]
+    [InlineData("{\"Version\":1,\"Items\":null}")]
+    public void DeserializeSettings_RejectsEmptyMalformedOrMissingRegistrationData(string json)
+    {
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+        Assert.Throws<JsonException>(() => SettingsFile.DeserializeSettings(stream));
+    }
+
+    [Fact]
+    public void DeserializeSettings_DoesNotDowngradeAnUnsupportedVersionToMalformedData()
+    {
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("""{"Version":2,"Items":[]}"""));
+        Assert.Throws<NotSupportedException>(() => SettingsFile.DeserializeSettings(stream));
+    }
+
 }
