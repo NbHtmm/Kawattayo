@@ -142,6 +142,55 @@ public sealed class CheckpointsTests
         Assert.Equal(stop, downloads.Stop);
     }
 
+
+    [Fact]
+    public void Create_CancellationAtEndOfScanDoesNotPersistAnEmptyBaseline()
+    {
+        using var cts = new CancellationTokenSource();
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner { OnScan = cts.Cancel };
+        var service = new Checkpoints(repository, scanner, new CopySpy(), TimeProvider.System);
+
+        Assert.Throws<OperationCanceledException>(() =>
+            service.Create("baseline", Path.GetFullPath("fixture"), true, "", cts.Token));
+        Assert.Empty(service.List());
+    }
+
+    [Fact]
+    public void Compare_CancellationAtEndOfEmptyScanDoesNotReturnSuccess()
+    {
+        using var cts = new CancellationTokenSource();
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner();
+        var service = new Checkpoints(repository, scanner, new CopySpy(), TimeProvider.System);
+        var point = service.Create("baseline", Path.GetFullPath("fixture"), true, "", CancellationToken.None);
+        scanner.OnScan = cts.Cancel;
+
+        Assert.Throws<OperationCanceledException>(() => service.Compare(point.Id, cts.Token));
+        Assert.Equal(point, Assert.Single(service.List()));
+    }
+
+    [Fact]
+    public void Collect_CancellationWhileReadingSelectionsDoesNotCallTheSaver()
+    {
+        using var cts = new CancellationTokenSource();
+        var downloads = new CopySpy();
+        var service = new Checkpoints(new MemoryRepository(), new ScriptedScanner(), downloads, TimeProvider.System);
+        var point = new CheckpointInfo("id", "baseline", Path.GetFullPath("fixture"), true, [], DateTimeOffset.UnixEpoch);
+
+        Assert.Throws<OperationCanceledException>(() =>
+            service.Collect(point, Enumerate(), Path.GetFullPath("output"), cts.Token));
+        Assert.Null(downloads.Output);
+        Assert.Empty(downloads.Requests);
+
+        IEnumerable<CheckpointDifference> Enumerate()
+        {
+            yield return new("first.txt", DifferenceKind.Added, new(1, 2, 3));
+            cts.Cancel();
+            yield return new("second.txt", DifferenceKind.Added, new(4, 5, 6));
+        }
+    }
+
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
@@ -171,7 +220,13 @@ public sealed class CheckpointsTests
     private sealed class ScriptedScanner : ICheckpointScanner
     {
         internal CheckpointScan View { get; set; } = new(new(StringComparer.OrdinalIgnoreCase), new(StringComparer.OrdinalIgnoreCase));
-        public CheckpointScan Scan(CheckpointInfo scope, CancellationToken stop) => View;
+        internal Action? OnScan { get; set; }
+
+        public CheckpointScan Scan(CheckpointInfo scope, CancellationToken stop)
+        {
+            OnScan?.Invoke();
+            return View;
+        }
     }
 
     private sealed class CopySpy : ICheckpointDownloads
