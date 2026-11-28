@@ -5,6 +5,70 @@ namespace ShareFileWatch;
 public sealed class StateStoreTests
 {
     [Fact]
+    public void Load_AppliesTheCacheToTheLoadedStateAndPreservesItsWarning()
+    {
+        var loaded = new AppState { PollSeconds = 25 };
+        var calls = new List<string>();
+        var storage = Substitute(
+            load: () => { calls.Add("settings"); return (loaded, "recovered"); },
+            restore: target =>
+            {
+                calls.Add("cache");
+                Assert.Same(loaded, target);
+                target.History.Enqueue(new(DateTimeOffset.UnixEpoch, @"C:\fixture\a.txt", "更新"));
+            });
+        var (actual, warning) = storage.Load();
+        Assert.Equal(new[] { "settings", "cache" }, calls);
+        Assert.Same(loaded, actual);
+        Assert.Single(actual.History);
+        Assert.Equal("recovered", warning);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Load_SurfacesSettingsOrCacheFailureWithoutReturningOrWritingPartialState(bool settingsFailure)
+    {
+        var failure = new IOException("failed storage");
+        var calls = new List<string>();
+        var storage = Substitute(
+            load: () => { calls.Add("settings"); return settingsFailure ? throw failure : (new(), null); },
+            restore: _ => { calls.Add("cache"); throw failure; });
+        Assert.Same(failure, Assert.Throws<IOException>(() => storage.Load()));
+        Assert.Equal(settingsFailure ? ["settings"] : new[] { "settings", "cache" }, calls);
+    }
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("settings")]
+    [InlineData("cache")]
+    public void Save_UsesTheSameSnapshotInOrderAndDoesNotHideWriteErrors(string failurePoint)
+    {
+        var snapshot = new AppState { PollSeconds = 42 };
+        var failure = new IOException("write fixture");
+        var calls = new List<string>();
+        void Write(string destination, AppState state)
+        {
+            Assert.Same(snapshot, state);
+            calls.Add(destination);
+            if (destination == failurePoint) throw failure;
+        }
+        var storage = Substitute(saveSettings: state => Write("settings", state), saveCache: state => Write("cache", state));
+        if (failurePoint == "none") storage.Save(snapshot);
+        else Assert.Same(failure, Assert.Throws<IOException>(() => storage.Save(snapshot)));
+        Assert.Equal(failurePoint == "settings" ? ["settings"] : new[] { "settings", "cache" }, calls);
+    }
+
+    private static StateStore Substitute(Func<(AppState State, string? Warning)>? load = null, Action<AppState>? restore = null,
+        Action<AppState>? saveSettings = null, Action<AppState>? saveCache = null) =>
+        new(@"C:\fixture\settings.json", backend: new(
+            () => throw new InvalidOperationException("Unexpected settings initialization"),
+            load ?? (() => throw new InvalidOperationException("Unexpected settings load")),
+            restore ?? (_ => throw new InvalidOperationException("Unexpected cache restore")),
+            saveSettings ?? (_ => throw new InvalidOperationException("Unexpected settings save")),
+            saveCache ?? (_ => throw new InvalidOperationException("Unexpected cache save"))));
+
+    [Fact]
     public void StorageDirectory_DefaultsBesideSettingsAndCanUseADifferentCacheDirectory()
     {
         string settings = Path.GetFullPath(Path.Combine("fixtures", "settings", "app.json"));

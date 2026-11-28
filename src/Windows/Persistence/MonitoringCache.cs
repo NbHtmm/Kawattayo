@@ -5,8 +5,6 @@ internal sealed class MonitoringCache(string database)
 {
     private readonly Dictionary<Guid, CachedTarget> __savedTargets = [];
     private HistoryEntry[] __savedHistory = [];
-    internal string DatabaseFile => database;
-
     internal void Restore(AppState state)
     {
         __savedTargets.Clear();
