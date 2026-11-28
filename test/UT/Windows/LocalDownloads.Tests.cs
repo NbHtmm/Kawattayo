@@ -32,4 +32,53 @@ public sealed class LocalDownloadsTests
     [InlineData("", false)]
     public void CanOpen_UsesFinalExtensionAndOnlyAllowsSupportedDocuments(string path, bool expected) =>
         Assert.Equal(expected, LocalDownloads.CanOpen(path));
+
+    [Fact]
+    public void SaveBatch_EmptyOrPreviouslyCanceledNeverInvokesPublisher()
+    {
+        var requested = new[] { new DownloadRequest("first", "first.txt"), new DownloadRequest("second", "second.txt") };
+        var stopped = new CancellationToken(true);
+        static DownloadResult Unexpected(string folder, DownloadRequest request, CancellationToken stop) =>
+            throw new InvalidOperationException("Unexpected publisher call: " + request.Source);
+        Assert.Empty(LocalDownloads.SaveBatch("output", [], CancellationToken.None, Unexpected));
+        Assert.Empty(LocalDownloads.SaveBatch("output", [], stopped, Unexpected));
+        var actual = LocalDownloads.SaveBatch("output", requested, stopped, Unexpected);
+        Assert.Equal(new[] { new DownloadResult("first", null, "キャンセル"), new DownloadResult("second", null, "キャンセル") }, actual);
+        Assert.Equal(actual, new LocalDownloads().Save("output", requested, stopped));
+    }
+
+    [Fact]
+    public void SaveBatch_CancelAfterFirstCompletedItemRetainsItAndStopsLaterWrites()
+    {
+        using var stop = new CancellationTokenSource();
+        var requested = new[] { new DownloadRequest("first", "first.txt"), new DownloadRequest("second", "second.txt") };
+        var published = new List<string>();
+        var actual = LocalDownloads.SaveBatch("output", requested, stop.Token, (folder, item, token) =>
+        {
+            Assert.Equal("output", folder);
+            Assert.Equal(stop.Token, token);
+            published.Add(item.Source);
+            stop.Cancel();
+            return new(item.Source, Path.Combine(folder, item.Relative), null);
+        });
+        Assert.Equal("first", Assert.Single(published));
+        Assert.Equal(new[] { new DownloadResult("first", Path.Combine("output", "first.txt"), null),
+            new DownloadResult("second", null, "キャンセル") }, actual);
+    }
+
+    [Fact]
+    public void SaveBatch_PreservesPerItemFailureAndContinuesWhenNotCanceled()
+    {
+        var requested = new[] { new DownloadRequest("first", "first.txt"), new DownloadRequest("second", "second.txt") };
+        var published = new List<string>();
+        var actual = LocalDownloads.SaveBatch("output", requested, CancellationToken.None, (folder, item, _) =>
+        {
+            published.Add(item.Source);
+            return item.Source == "first" ? new(item.Source, null, "occupied") :
+                new(item.Source, Path.Combine(folder, item.Relative), null);
+        });
+        Assert.Equal(new[] { "first", "second" }, published);
+        Assert.Equal(new[] { new DownloadResult("first", null, "occupied"),
+            new DownloadResult("second", Path.Combine("output", "second.txt"), null) }, actual);
+    }
 }

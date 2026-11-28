@@ -13,9 +13,20 @@ internal sealed class LocalDownloads : ICheckpointDownloads
 
     internal static bool CanOpen(string path) => Documents.Contains(Path.GetExtension(path));
 
-    public DownloadResult[] Save(string folder, IReadOnlyList<DownloadRequest> requests, CancellationToken stop)
+
+    public DownloadResult[] Save(string folder, IReadOnlyList<DownloadRequest> requests, CancellationToken stop) =>
+        SaveBatch(folder, requests, stop, SaveOne);
+
+    // Keep completed results. Do not invoke the publisher for items not started when cancellation arrives.
+    internal static DownloadResult[] SaveBatch(string folder, IReadOnlyList<DownloadRequest> requests, CancellationToken stop, Func<string, DownloadRequest, CancellationToken, DownloadResult> publish)
     {
-        return requests.Select(request => SaveOne(folder, request, stop)).ToArray();
+        var results = new DownloadResult[requests.Count];
+        for (int i = 0; i < requests.Count; i++)
+        {
+            var request = requests[i];
+            results[i] = stop.IsCancellationRequested ? new(request.Source, null, "キャンセル") : publish(folder, request, stop);
+        }
+        return results;
     }
 
     private static DownloadResult SaveOne(string folder, DownloadRequest request, CancellationToken stop)
