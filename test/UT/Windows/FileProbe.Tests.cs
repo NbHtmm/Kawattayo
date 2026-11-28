@@ -32,6 +32,57 @@ public sealed class FileProbeTests
         Assert.Throws<ArgumentException>(() => FileProbe.NormalizeFolder(input));
 
     [Fact]
+    public void Normalize_ValidatesFilePathsAndPreservesTheSelectedName()
+    {
+        Assert.Equal(@"C:\fixtures\quarterly.report.txt",
+            FileProbe.Normalize(@"  ""C:/fixtures/quarterly.report.txt""  "));
+        Assert.Equal(@"\\fixture\share\directory\report.txt",
+            FileProbe.Normalize(@"\\fixture\share\directory\report.txt"));
+
+        // ファイル指定にはルートだけ、曖昧な名前、ファイル以外のパス形式を認めない。
+        string[] rejected =
+        [
+            "", "   ", @"C:report.txt", @"\report.txt", @"report.txt",
+            @"C:\", @"\\fixture\share\", @"C:\fixtures\report.txt\", @"C:\fixtures\\report.txt",
+            @"C:\fixtures\sample.\report.txt", @"C:\fixtures\sample \report.txt",
+            @"C:\fixtures\report.", @"C:\fixtures\invalid:name.txt",
+            @"C:\fixtures\*.txt", @"C:\fixtures\report?.txt", @"C:\fixtures\rep""ort.txt",
+            @"C:\fixtures\rep<ort.txt", @"C:\fixtures\rep>ort.txt", @"C:\fixtures\rep|ort.txt",
+            "C:\\fixtures\\re\0port.txt", @"\\?\C:\fixtures\report.txt", @"\\.\C:\fixtures\report.txt"
+        ];
+        foreach (var path in rejected)
+        {
+            Assert.Throws<ArgumentException>(() => FileProbe.Normalize(path));
+        }
+    }
+
+    [Fact]
+    public void NormalizeFolder_ValidatesFolderPathsAndAllowsRealRoots()
+    {
+        Assert.Equal(@"C:\", FileProbe.NormalizeFolder(@"C:\"));
+        Assert.Equal(@"\\fixture\share", FileProbe.NormalizeFolder(@"\\fixture\share\"));
+        Assert.Equal(@"\\fixture\share", FileProbe.NormalizeFolder(@"\\fixture\share"));
+        Assert.Equal(@"C:\fixtures\test folder",
+            FileProbe.NormalizeFolder(@" ""C:/fixtures/test folder/"" "));
+        Assert.Equal(@"C:\fixtures\test folder",
+            FileProbe.NormalizeFolder(@"C:\fixtures\previous\..\test folder"));
+
+        // サーバー名だけは共有のルートではない。ドライブや共有のルートとは区別する。
+        string[] rejected =
+        [
+            "", " ", @"C:folder", @"\folder", @"relative\folder",
+            @"\\fixture", @"\\fixture\", @"C:\fixtures\invalid:name",
+            @"C:\fixtures\*", @"C:\fixtures\?", @"C:\fixtures\fo""lder",
+            @"C:\fixtures\fo<lder", @"C:\fixtures\fo>lder", @"C:\fixtures\fo|lder",
+            "C:\\fixtures\\fo\0lder", @"\\?\C:\fixtures", @"\\.\C:\fixtures"
+        ];
+        foreach (var path in rejected)
+        {
+            Assert.Throws<ArgumentException>(() => FileProbe.NormalizeFolder(path));
+        }
+    }
+
+    [Fact]
     public void ExtendedPath_LeavesBothPathTypesUnchangedBelowTheWin32Threshold()
     {
         Assert.Equal(@"C:\test\普通.txt", FileProbe.ExtendedPath(@"C:\test\普通.txt"));
