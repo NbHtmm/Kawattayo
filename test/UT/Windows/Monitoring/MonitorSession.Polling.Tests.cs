@@ -4,6 +4,36 @@ using Xunit;
 public sealed class MonitorSessionPollingTests
 {
     [Fact]
+    public void ClaimPollRoots_CaseInsensitiveDriveAndShareGroupsKeepTargetOrder()
+    {
+        string[] paths = [@"C:\first.txt", @"\\nas\logs\a.log", @"c:\folder\second.txt",
+            @"\\NAS\LOGS\b.log", @"\\nas\results\x.csv", @"D:\other.txt"];
+        var inFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var groups = MonitorSession.ClaimPollRoots(paths, static x => x, inFlight);
+        Assert.Equal(4, groups.Length);
+        Assert.Equal(new[] { paths[0], paths[2] }, groups[0]);
+        Assert.Equal(new[] { paths[1], paths[3] }, groups[1]);
+        Assert.Equal(paths[4], Assert.Single(groups[2]));
+        Assert.Equal(paths[5], Assert.Single(groups[3]));
+        Assert.Equal(4, inFlight.Count);
+    }
+
+    [Fact]
+    public void ClaimPollRoots_BusyRootIsSkippedUntilReleasedWithoutBlockingOtherRoots()
+    {
+        string[] paths = [@"C:\busy.txt", @"D:\ready.txt"];
+        var inFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"c:\" };
+        Assert.Empty(MonitorSession.ClaimPollRoots(Array.Empty<string>(), static x => x, inFlight));
+        Assert.Single(inFlight);
+        var ready = Assert.Single(MonitorSession.ClaimPollRoots(paths, static x => x, inFlight));
+        Assert.Equal(paths[1], Assert.Single(ready));
+        Assert.Empty(MonitorSession.ClaimPollRoots(paths, static x => x, inFlight));
+        Assert.True(inFlight.Remove(@"C:\"));
+        var released = Assert.Single(MonitorSession.ClaimPollRoots(paths, static x => x, inFlight));
+        Assert.Equal(paths[0], Assert.Single(released));
+    }
+
+    [Fact]
     public void ReconciliationDue_UnknownFullScanRequiresReconciliationWithoutReadingTheClock()
     {
         Assert.True(MonitorSession.ReconciliationDue(null, new ClockWithoutTimestamp()));

@@ -68,12 +68,10 @@ internal sealed partial class MonitorSession
             return ReconciliationDue(c.LastFull, __clock) || f != c.Feed || f is null || !f.Available ||
                 f.Epoch != c.Epoch || f.Failed || f.Stamp(i.IsFolder, i.Path) != c.Stamp;
         }
-        var groups = __state.Items
+        var targets = __state.Items
             .Where(x => (x.IsFolder || !FileExclusions.Matches(x.Path, exclusions)) && Due(x))
-            .Select(x => new ScanTarget(new(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision, exclusions, __state.WatchDirectoryTime), low, feeds?.GetValueOrDefault(x.Id)))
-            .GroupBy(x => Path.TrimEndingDirectorySeparator(Path.GetPathRoot(x.Path)!), StringComparer.OrdinalIgnoreCase)
-            .Where(x => __activeScanRoots.Add(x.Key))
-            .ToArray();
+            .Select(x => new ScanTarget(new(x.Id, x.Path, x.IsFolder, x.Recursive, x.Revision, exclusions, __state.WatchDirectoryTime), low, feeds?.GetValueOrDefault(x.Id)));
+        var groups = ClaimPollRoots(targets, static x => x.Path, __activeScanRoots);
 
         // 応答が返るのを待たずに次周期を予約する。遅い共有先以外は次周期でも巡回できる。
         StartTimer();
@@ -87,6 +85,12 @@ internal sealed partial class MonitorSession
         int generation = __scanGeneration;
         return Task.WhenAll(groups.Select(group => ScanRoot(group.Key, group, generation)));
     }
+
+    // Reserve all available roots before starting workers. Keep target order inside each root.
+    internal static IGrouping<string, T>[] ClaimPollRoots<T>(IEnumerable<T> targets, Func<T, string> path, HashSet<string> activeRoots) =>
+        targets.GroupBy(x => Path.TrimEndingDirectorySeparator(Path.GetPathRoot(path(x))!), StringComparer.OrdinalIgnoreCase)
+            .Where(x => activeRoots.Add(x.Key))
+            .ToArray();
 
     private async Task ScanRoot(string root, IEnumerable<ScanTarget> targets, int generation)
     {
