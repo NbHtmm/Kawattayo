@@ -85,4 +85,81 @@ public sealed class SnapshotWriterTests
         Assert.Equal(3, attempts);
         Assert.Null(writer.Error);
     }
+
+    [Fact]
+    public async Task FlushAsync_AFirstFailureDoesNotDiscardANewerQueuedSnapshot()
+    {
+        var cancellation = TestContext.Current.CancellationToken;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var finishFirst = new ManualResetEventSlim();
+        var attempts = new ConcurrentQueue<int>();
+        var statesAfterWrites = new ConcurrentQueue<string?>();
+        var state = new AppState { PollSeconds = 10 };
+        SnapshotWriter writer = null!;
+        writer = new SnapshotWriter(state.CaptureForSave, snapshot =>
+        {
+            attempts.Enqueue(snapshot.PollSeconds);
+            if (snapshot.PollSeconds != 10) return;
+
+            started.TrySetResult();
+            if (!finishFirst.Wait(s_timeout, cancellation)) throw new TimeoutException("First write was not released.");
+            throw new IOException("fixture transient write error");
+        }, () => statesAfterWrites.Enqueue(writer.Error));
+
+        writer.Enqueue();
+        try
+        {
+            await started.Task.WaitAsync(s_timeout, cancellation);
+            state.PollSeconds = 25;
+            writer.Enqueue();
+        }
+        finally { finishFirst.Set(); }
+
+        await writer.FlushAsync().WaitAsync(s_timeout, cancellation);
+        await writer.FlushAsync().WaitAsync(s_timeout, cancellation);
+        Assert.Equal(new[] { 10, 25 }, attempts.ToArray());
+        Assert.Equal(new string?[] { "fixture transient write error", null }, statesAfterWrites.ToArray());
+    }
+
+    [Fact]
+    public async Task FlushAsync_RetriesTheSameSnapshotFollowingOneTransientFailure()
+    {
+        var cancellation = TestContext.Current.CancellationToken;
+        int attempts = 0;
+        int callbacks = 0;
+        var writer = new SnapshotWriter(() => new AppState(), _ =>
+        {
+            if (Interlocked.Increment(ref attempts) == 1) throw new IOException("fixture transient failure");
+        }, () => Interlocked.Increment(ref callbacks));
+
+        writer.Enqueue();
+        await writer.FlushAsync().WaitAsync(s_timeout, cancellation);
+
+        Assert.Equal(2, attempts);
+        Assert.Equal(2, callbacks);
+        Assert.Null(writer.Error);
+    }
+
+    [Fact]
+    public async Task FlushAsync_DoesNotMistakeAnUnexpectedErrorForAnExpectedDiskFailure()
+    {
+        var cancellation = TestContext.Current.CancellationToken;
+        using var release = new ManualResetEventSlim();
+        int callbacks = 0;
+        var writer = new SnapshotWriter(() => new AppState(), _ =>
+        {
+            if (!release.Wait(s_timeout, cancellation)) throw new TimeoutException("Write was not released.");
+            throw new InvalidOperationException("fixture invariant");
+        }, () => Interlocked.Increment(ref callbacks));
+
+        writer.Enqueue();
+        Task flush = writer.FlushAsync();
+        release.Set();
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => flush.WaitAsync(s_timeout, cancellation));
+
+        Assert.Equal("fixture invariant", ex.Message);
+        Assert.Null(writer.Error);
+        Assert.Equal(0, callbacks);
+    }
+
 }
