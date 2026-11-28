@@ -35,12 +35,17 @@ internal static class FileProbe
     }
 
     /// @brief 入力から観測値または保存状態を読み込む。
-    public static ProbeResult Read(string path)
+    public static ProbeResult Read(string path) => Read(path, TryFind, Directory.Exists);
+
+    // OSから渡された属性とエラーの判定を、実ファイルを開かず単体試験できるようにする。
+    internal delegate bool FindEntry(string path, out FindData data, out int error);
+
+    internal static ProbeResult Read(string path, FindEntry find, Func<string, bool> directoryExists)
     {
         // 検索に失敗したときは、消失とアクセス不能を切り分ける。
-        if (!TryFind(path, out var data, out int error))
+        if (!find(path, out var data, out int error))
         {
-            return InterpretMissing(path, error);
+            return InterpretMissing(path, error, find, directoryExists);
         }
 
         // ディレクトリと再解析ポイントは通常ファイルとして比較しない。
@@ -54,7 +59,7 @@ internal static class FileProbe
     }
 
     /// @brief 親ディレクトリを照会できる場合だけ消失と判定する。
-    private static ProbeResult InterpretMissing(string path, int error)
+    private static ProbeResult InterpretMissing(string path, int error, FindEntry find, Func<string, bool> directoryExists)
     {
         // 「ファイルなし」以外のエラーを消失通知にしない。
         if (error != FileNotFound)
@@ -65,7 +70,7 @@ internal static class FileProbe
         // 親フォルダを確認できない場合は、ファイル消失と断定しない。
         var parent = Path.GetDirectoryName(path);
         // 親を列挙でき、対象だけが見つからない場合に限って消失とみなす。
-        if (parent is not null && CanSeeDirectory(parent))
+        if (parent is not null && CanSeeDirectory(parent, find, directoryExists))
         {
             return new(ProbeState.Missing);
         }
@@ -74,15 +79,15 @@ internal static class FileProbe
     }
 
     /// @brief 空のディレクトリも含め親を列挙可能か確認する。
-    private static bool CanSeeDirectory(string parent)
+    private static bool CanSeeDirectory(string parent, FindEntry find, Func<string, bool> directoryExists)
     {
         // 検索が開始できれば、親ディレクトリにはアクセスできている。
-        if (TryFind(Path.Combine(parent, "*"), out _, out int error))
+        if (find(Path.Combine(parent, "*"), out _, out int error))
         {
             return true;
         }
         // 空ディレクトリの列挙は、共有によって「該当なし」を返すことがある。
-        return (error == FileNotFound || error == NoMoreFiles) && Directory.Exists(parent);
+        return (error == FileNotFound || error == NoMoreFiles) && directoryExists(parent);
     }
 
     /// @brief ファイル本体を開かず検索 API で属性を取得する。
@@ -197,7 +202,7 @@ internal static class FileProbe
 
     /// @brief Win32 の検索結果と同じ順序・幅の構造体。
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct FindData
+    internal struct FindData
     {
         public uint Attributes; //!< ファイル種別を示す Win32 属性。
         public FILETIME Created, Accessed, Written; //!< 作成・アクセス・書き込みの各 FILETIME。

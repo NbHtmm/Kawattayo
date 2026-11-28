@@ -44,7 +44,7 @@ source,signature,case_ids,scope
 "src/Windows/Monitoring/UpdateHooks.cs","ShareFileWatch.UpdateHooks.Run(CancellationToken token)","SCT-HOOK-002;SCT-HOOK-003","Superseded updates and removed registrations do not launch an old operation"
 "src/Windows/Monitoring/UpdateHooks.cs","ShareFileWatch.UpdateHooks.Execute(Job job, CancellationToken token)","SCT-HOOK-001;SCT-HOOK-002","Launch only a configured test-process fixture; report success or error status"
 "src/Windows/FileProbe.cs","ShareFileWatch.FileProbe.Read(string path)","SCT-GUI-004;SCT-SMB-003","Observe local file updates and disappearance; dedicated UNC path handling"
-"src/Windows/FileProbe.cs","ShareFileWatch.FileProbe.InterpretMissing(string path, int error)","SCT-GUI-004;SCT-SMB-003","Missing path differs from a dedicated inaccessible location"
+"src/Windows/FileProbe.cs","ShareFileWatch.FileProbe.InterpretMissing(string path, int error, FindEntry find, Func<string, bool> directoryExists)","SCT-GUI-004;SCT-SMB-003","Missing path differs from a dedicated inaccessible location"
 "src/Windows/FileProbe.cs","ShareFileWatch.FileProbe.ListDirectory(string path, int maxEntries, CancellationToken cancellation = default)","SCT-GUI-005;SCT-SMB-003","Local unavailable directory and dedicated UNC behavior"
 "avalonia/Collection/CollectorWindow.cs","ShareFileWatch.CollectorWindow.CollectorWindow(Checkpoints checkpoints, Action showMonitor)","SCT-GUI-023","Three fields can be identified by accessibility names and the collector can create and compare a baseline"
 "avalonia/Collection/CollectorWindow.cs","ShareFileWatch.CollectorWindow.Create()","SCT-GUI-023","Persist a baseline created with the GUI controls and active exclusions"

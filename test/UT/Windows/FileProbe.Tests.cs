@@ -83,6 +83,106 @@ public sealed class FileProbeTests
     }
 
     [Fact]
+    public void Read_ReportsRegularFileMetadataAndRejectsOtherEntryTypes()
+    {
+        const string path = @"C:\fixture\report.txt";
+        var record = new FileProbe.FindData
+        {
+            Created = new() { dwHighDateTime = 1, dwLowDateTime = 2 },
+            Written = new() { dwHighDateTime = 3, dwLowDateTime = 4 },
+            SizeHigh = 1,
+            SizeLow = 5
+        };
+        var read = FileProbe.Read(path, Find, UnexpectedDirectoryQuery);
+        Assert.Equal(new ProbeResult(ProbeState.Found, new((3L << 32) | 4, (1L << 32) | 2, (1UL << 32) | 5)), read);
+        foreach (uint flags in new uint[] { 0x10, 0x400, 0x410 })
+        {
+            record.Attributes = flags;
+            var rejected = FileProbe.Read(path, Find, UnexpectedDirectoryQuery);
+            Assert.Equal(ProbeState.Unavailable, rejected.State);
+            Assert.Null(rejected.Fingerprint);
+            Assert.NotEmpty(rejected.Error!);
+        }
+
+        bool Find(string candidate, out FileProbe.FindData data, out int error)
+        {
+            Assert.Equal(path, candidate);
+            data = record;
+            error = 0;
+            return true;
+        }
+    }
+
+    [Fact]
+    public void Read_DistinguishesMissingFilesFromFailedParentProbes()
+    {
+        const string parent = @"C:\fixture";
+        string path = Path.Combine(parent, "report.txt");
+        int errorCode = 2;
+        bool canEnumerateParent = true;
+        int parentError = 0;
+        bool exists = false;
+        var queries = new List<string>();
+        Assert.Equal(new ProbeResult(ProbeState.Missing), FileProbe.Read(path, Find, UnexpectedDirectoryQuery));
+        Assert.Equal(new[] { path, Path.Combine(parent, "*") }, queries);
+
+        canEnumerateParent = false;
+        foreach (int emptyCode in new[] { 2, 18 })
+        {
+            parentError = emptyCode;
+            exists = true;
+            Assert.Equal(new ProbeResult(ProbeState.Missing), FileProbe.Read(path, Find, DirectoryExists));
+            exists = false;
+            Assert.Equal(ProbeState.Unavailable, FileProbe.Read(path, Find, DirectoryExists).State);
+        }
+        parentError = 5;
+        Assert.Equal(ProbeState.Unavailable, FileProbe.Read(path, Find, UnexpectedDirectoryQuery).State);
+
+        // アクセス拒否やネットワークエラー自体をファイルの削除として扱わない。
+        foreach (int directError in new[] { 3, 5, 53 })
+        {
+            queries.Clear();
+            errorCode = directError;
+            var result = FileProbe.Read(path, Find, UnexpectedDirectoryQuery);
+            Assert.Equal(ProbeState.Unavailable, result.State);
+            Assert.Contains($"Win32 {directError}", result.Error);
+            Assert.Equal(path, Assert.Single(queries));
+        }
+        Assert.Equal(ProbeState.Unavailable, FileProbe.Read(@"C:\", RootMissing, UnexpectedDirectoryQuery).State);
+
+        bool Find(string candidate, out FileProbe.FindData data, out int error)
+        {
+            queries.Add(candidate);
+            data = default;
+            if (candidate == path)
+            {
+                error = errorCode;
+                return false;
+            }
+            Assert.Equal(Path.Combine(parent, "*"), candidate);
+            error = parentError;
+            return canEnumerateParent;
+        }
+
+        bool DirectoryExists(string candidate)
+        {
+            Assert.Equal(parent, candidate);
+            return exists;
+        }
+    }
+
+    private static bool RootMissing(string candidate, out FileProbe.FindData data, out int error)
+    {
+        Assert.Equal(@"C:\", candidate);
+        data = default;
+        error = 2;
+        return false;
+    }
+
+    private static bool UnexpectedDirectoryQuery(string path) =>
+        throw new InvalidOperationException($"Unexpected directory existence query: {path}");
+
+    [Fact]
     public void ExtendedPath_LeavesBothPathTypesUnchangedBelowTheWin32Threshold()
     {
         Assert.Equal(@"C:\test\普通.txt", FileProbe.ExtendedPath(@"C:\test\普通.txt"));
