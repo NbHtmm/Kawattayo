@@ -36,18 +36,9 @@ internal sealed class LocalDownloads : ICheckpointDownloads
         try
         {
             stop.ThrowIfCancellationRequested();
-            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
-            var drive = Path.GetPathRoot(root);
-            if (drive?.Length != 3 || new DriveInfo(drive).DriveType is not (DriveType.Fixed or DriveType.Removable or DriveType.Ram))
-                throw new IOException("ローカルドライブのフォルダを選択してください。");
+            var destination = ResolveDestination(folder, request, static drive => new DriveInfo(drive).DriveType);
 
-            var destination = Path.GetFullPath(Path.Combine(root, request.Relative));
-            var relative = Path.GetRelativePath(root, destination);
-            if (Path.IsPathRooted(relative) || relative is "." or ".." || relative.StartsWith(@"..\") ||
-                string.Equals(destination, request.Source, StringComparison.OrdinalIgnoreCase))
-                throw new IOException("保存先に元ファイルや指定フォルダの外は選べません。");
-
-            if (request.SourceRoot is { } sourceRoot) EnsureSourceDirectories(request.Source, sourceRoot);
+            if (request.SourceRoot is { } sourceRoot) EnsureSourceDirectories(request.Source, sourceRoot, File.GetAttributes);
             var expected = FileProbe.Read(request.Source).Fingerprint
                 ?? throw new IOException("元ファイルを確認できません。");
             if (request.Expected is { } preview && preview != expected)
@@ -93,6 +84,21 @@ internal sealed class LocalDownloads : ICheckpointDownloads
         }
     }
 
+    // Canonicalize both path components before applying the local-drive and output-scope policy.
+    internal static string ResolveDestination(string folder, DownloadRequest request, Func<string, DriveType> driveType)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        var drive = Path.GetPathRoot(root);
+        if (drive?.Length != 3 || driveType(drive) is not (DriveType.Fixed or DriveType.Removable or DriveType.Ram))
+            throw new IOException("ローカルドライブのフォルダを選択してください。");
+        var destination = Path.GetFullPath(Path.Combine(root, request.Relative));
+        var relative = Path.GetRelativePath(root, destination);
+        if (Path.IsPathRooted(relative) || relative is "." or ".." || relative.StartsWith(@"..\") ||
+            string.Equals(destination, request.Source, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("保存先に元ファイルや指定フォルダの外は選べません。");
+        return destination;
+    }
+
     private static FileStream OpenShared(string path) =>
         new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920, FileOptions.SequentialScan);
 
@@ -108,27 +114,29 @@ internal sealed class LocalDownloads : ICheckpointDownloads
             zone.CopyToAsync(output, stop).GetAwaiter().GetResult();
     }
 
-    private static void EnsureSourceDirectories(string source, string root)
+    internal static void EnsureSourceDirectories(string source, string root, Func<string, FileAttributes> attributes)
     {
         // 比較後に親フォルダがジャンクションへ差し替わっていないか確認する。
         for (var parent = Path.GetDirectoryName(source); parent is not null; parent = Path.GetDirectoryName(parent))
         {
-            if ((File.GetAttributes(parent) & FileAttributes.ReparsePoint) != 0)
+            if ((attributes(parent) & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("リンクを経由する元ファイルはコピーできません。");
             if (string.Equals(Path.TrimEndingDirectorySeparator(parent), root, StringComparison.OrdinalIgnoreCase)) return;
         }
         throw new IOException("元ファイルが対象フォルダの外にあります。");
     }
 
-    private static void PrepareDestination(string parent)
+    private static void PrepareDestination(string parent) =>
+        PrepareDestination(parent, static path => Directory.CreateDirectory(path).Attributes);
+
+    internal static void PrepareDestination(string parent, Func<string, FileAttributes> createDirectory)
     {
         // 既存のジャンクションなどをたどり、意図せず共有先へ書き込まない。
         var parents = new Stack<string>();
         for (string? path = parent; path is not null; path = Path.GetDirectoryName(path)) parents.Push(path);
         while (parents.TryPop(out var directory))
         {
-            var info = Directory.CreateDirectory(directory);
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+            if ((createDirectory(directory) & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("リンクやジャンクションを含まない保存先を選択してください。");
         }
     }

@@ -4,6 +4,84 @@ using Xunit;
 public sealed class LocalDownloadsTests
 {
     [Theory]
+    [InlineData(DriveType.Fixed)]
+    [InlineData(DriveType.Removable)]
+    [InlineData(DriveType.Ram)]
+    public void ResolveDestination_CanonicalizesAChildOnAValidLocalDrive(DriveType type)
+    {
+        string result = LocalDownloads.ResolveDestination(@"D:\results\",
+            new(@"C:\trial\report.csv", @"logs\..\report.csv"),
+            drive => { Assert.Equal(@"D:\", drive); return type; });
+        Assert.Equal(@"D:\results\report.csv", result);
+    }
+
+    [Theory]
+    [InlineData(DriveType.Network)]
+    [InlineData(DriveType.CDRom)]
+    [InlineData(DriveType.NoRootDirectory)]
+    [InlineData(DriveType.Unknown)]
+    public void ResolveDestination_RejectsIneligibleDriveTypes(DriveType type) =>
+        Assert.Throws<IOException>(() => LocalDownloads.ResolveDestination(@"D:\results", new(@"C:\trial\a.csv", "a.csv"), _ => type));
+
+    [Fact]
+    public void ResolveDestination_RejectsNetworkDestinationsBeforeReadingDriveType() =>
+        Assert.Throws<IOException>(() => LocalDownloads.ResolveDestination(@"\\nas\share\results", new(@"C:\trial\a.csv", "a.csv"),
+            _ => throw new InvalidOperationException("UNC is not a local drive")));
+
+    [Theory]
+    [InlineData(".", @"C:\trial\a.csv")]
+    [InlineData("..", @"C:\trial\a.csv")]
+    [InlineData(@"..\results2\a.csv", @"C:\trial\a.csv")]
+    [InlineData(@"C:\outside\a.csv", @"C:\trial\a.csv")]
+    [InlineData("REPORT.csv", @"d:\RESULTS\report.csv")]
+    public void ResolveDestination_RefusesEscapesAndCopiesOntoTheInput(string relative, string source) =>
+        Assert.Throws<IOException>(() => LocalDownloads.ResolveDestination(@"D:\results", new(source, relative), _ => DriveType.Fixed));
+
+    [Fact]
+    public void EnsureSourceDirectories_ChecksTheExactParentChainAndDoesNotWalkAboveTheSelectedRoot()
+    {
+        var checkedPaths = new List<string>();
+        LocalDownloads.EnsureSourceDirectories(@"C:\trial\logs\run\report.csv", @"c:\TRIAL",
+            path => { checkedPaths.Add(path); return FileAttributes.Directory; });
+        Assert.Equal(new[] { @"C:\trial\logs\run", @"C:\trial\logs", @"C:\trial" }, checkedPaths);
+    }
+
+    [Theory]
+    [InlineData(@"C:\trial", @"C:\trial\logs")]
+    [InlineData(@"C:\trial", @"C:\trial")]
+    [InlineData(@"C:\different", null)]
+    public void EnsureSourceDirectories_RefusesLinksOrSourcesOutsideTheSelectedRoot(string root, string? link)
+    {
+        var checkedPaths = new List<string>();
+        Assert.Throws<IOException>(() => LocalDownloads.EnsureSourceDirectories(@"C:\trial\logs\report.csv", root,
+            path =>
+            {
+                checkedPaths.Add(path);
+                return FileAttributes.Directory | (path == link ? FileAttributes.ReparsePoint : 0);
+            }));
+        Assert.Equal(link ?? @"C:\", checkedPaths[^1]);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(@"D:\")]
+    [InlineData(@"D:\results")]
+    [InlineData(@"D:\results\logs")]
+    public void PrepareDestination_WalksRootToLeafAndStopsBeforeTraversingAnyLink(string? link)
+    {
+        var seen = new List<string>();
+        string[] chain = [@"D:\", @"D:\results", @"D:\results\logs"];
+        void Prepare() => LocalDownloads.PrepareDestination(chain[^1], path =>
+        {
+            seen.Add(path);
+            return FileAttributes.Directory | (path == link ? FileAttributes.ReparsePoint : 0);
+        });
+        if (link is null) Prepare();
+        else Assert.Throws<IOException>(Prepare);
+        Assert.Equal(link is null ? chain : chain[..(Array.IndexOf(chain, link) + 1)], seen);
+    }
+
+    [Theory]
     [InlineData("report.TXT", true)]
     [InlineData("sub/report.PdF", true)]
     [InlineData("report.xlsx", true)]
