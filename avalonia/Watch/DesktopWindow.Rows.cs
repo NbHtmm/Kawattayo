@@ -103,7 +103,7 @@ internal sealed partial class DesktopWindow
                 item.LatestFileWriteAt, count, item.Path, Folder: item.IsFolder, Root: true,
                 TargetInfo: new(state, item.LastChecked, scope, feed, elapsed, item.QueryMs));
         });
-        Assign(__targets, SortTargets(rows));
+        Assign(__targets, SortTargets(rows, __targetSort, __targetReverse));
     }
 
     private void RefreshHistory()
@@ -199,10 +199,10 @@ internal sealed partial class DesktopWindow
         return siblings;
     }
 
-    private static IEnumerable<Row> Order(IEnumerable<Row> rows, int column, bool reverse) =>
+    internal static IEnumerable<Row> Order(IEnumerable<Row> rows, int column, bool reverse) =>
         Order(rows, static row => row, column, reverse);
 
-    private static IEnumerable<T> Order<T>(IEnumerable<T> rows, Func<T, Row> select, int column, bool reverse) => column switch
+    internal static IEnumerable<T> Order<T>(IEnumerable<T> rows, Func<T, Row> select, int column, bool reverse) => column switch
     {
         1 => Sorted(rows, x => InboxKind(select(x)), reverse),
         3 => Sorted(rows, x => select(x).At, reverse),
@@ -211,21 +211,21 @@ internal sealed partial class DesktopWindow
             : rows.OrderBy(x => select(x).Name, StringComparer.CurrentCultureIgnoreCase)
     };
 
-    private static IEnumerable<T> Sorted<T, TKey>(IEnumerable<T> items, Func<T, TKey> key, bool descending) =>
+    internal static IEnumerable<T> Sorted<T, TKey>(IEnumerable<T> items, Func<T, TKey> key, bool descending) =>
         descending ? items.OrderByDescending(key) : items.OrderBy(key);
 
-    private IEnumerable<Row> SortTargets(IEnumerable<Row> rows) => __targetSort switch
+    internal static IEnumerable<Row> SortTargets(IEnumerable<Row> rows, int column, bool reverse) => column switch
     {
-        1 => Sorted(rows, x => x.Count, __targetReverse),
-        2 => Sorted(rows, x => x.TargetInfo?.State, __targetReverse),
-        3 => Sorted(rows, x => x.At, __targetReverse),
-        4 => Sorted(rows, x => x.TargetInfo?.Checked, __targetReverse),
-        5 => Sorted(rows, x => x.Folder, __targetReverse),
-        6 => Sorted(rows, x => x.TargetInfo?.Recursive, __targetReverse),
-        7 => Sorted(rows, x => x.TargetInfo?.Feed, __targetReverse),
-        8 => Sorted(rows, x => x.TargetInfo?.ElapsedMs, __targetReverse),
-        9 => Sorted(rows, x => x.Path, __targetReverse),
-        _ => Sorted(rows, x => x.Name, __targetReverse)
+        1 => Sorted(rows, x => x.Count, reverse),
+        2 => Sorted(rows, x => x.TargetInfo?.State, reverse),
+        3 => Sorted(rows, x => x.At, reverse),
+        4 => Sorted(rows, x => x.TargetInfo?.Checked, reverse),
+        5 => Sorted(rows, x => x.Folder, reverse),
+        6 => Sorted(rows, x => x.TargetInfo?.Recursive, reverse),
+        7 => Sorted(rows, x => x.TargetInfo?.Feed, reverse),
+        8 => Sorted(rows, x => x.TargetInfo?.ElapsedMs, reverse),
+        9 => Sorted(rows, x => x.Path, reverse),
+        _ => Sorted(rows, x => x.Name, reverse)
     };
 
     private static void Assign(ListBox list, IEnumerable<Row> rows)

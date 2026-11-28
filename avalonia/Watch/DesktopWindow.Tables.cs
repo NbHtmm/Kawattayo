@@ -65,7 +65,7 @@ internal sealed partial class DesktopWindow
         grid.Children.Add(cell);
     }
 
-    private static string TimeCell(DateTimeOffset? time) => time?.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss") ?? "—";
+    internal static string TimeCell(DateTimeOffset? time) => time?.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss") ?? "—";
 
     private Control BuildTableRow(Row row, ListBox list)
     {
@@ -128,6 +128,6 @@ internal sealed partial class DesktopWindow
         return name;
     }
 
-    private static string InboxKind(Row row) => row.Change?.Kind ??
+    internal static string InboxKind(Row row) => row.Change?.Kind ??
         (row.Folder ? $"{row.Count:N0} 件" : row.Target?.LastChange ?? "更新");
 }

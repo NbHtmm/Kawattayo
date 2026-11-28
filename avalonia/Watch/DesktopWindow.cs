@@ -32,11 +32,11 @@ internal sealed partial class DesktopWindow : Window
     private int __inboxSort, __targetSort, __historySort;
     private bool __inboxReverse, __targetReverse, __historyReverse = true;
 
-    private sealed record Row(string Key, WatchItem? Target, string Name, string Detail, DateTimeOffset? At,
+    internal sealed record Row(string Key, WatchItem? Target, string Name, string Detail, DateTimeOffset? At,
         int? Count = null, string? Path = null, FileChange? Change = null, bool Folder = false, int Depth = 0,
         string? Branch = null, bool Expanded = false, bool Root = false, TargetRowInfo? TargetInfo = null);
 
-    private sealed record TargetRowInfo(string State, DateTimeOffset? Checked, string Recursive, string Feed, string Elapsed, long? ElapsedMs);
+    internal sealed record TargetRowInfo(string State, DateTimeOffset? Checked, string Recursive, string Feed, string Elapsed, long? ElapsedMs);
 
     internal DesktopWindow(MonitorSession monitor, Checkpoints checkpoints)
     {
