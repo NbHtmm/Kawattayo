@@ -104,7 +104,9 @@ internal sealed class CollectorWindow : Window
     {
         if (preview is not { } info) return;
         var selected = SelectedChanges();
-        if (selected.Length == 0 || await PickFolder("保存先を選択") is not { } output) return;
+        var output = await CollectorExportSelection.ResolveDestination(info, selected.Length,
+            () => preview, () => PickFolder("保存先を選択"), stop);
+        if (output is null) return;
         var copies = await Task.Run(() => checkpoints.Collect(info, selected, output, stop), stop);
         status.Text = $"保存 {copies.Count(x => x.Saved is not null):N0}件 ／ 未保存 {copies.Count(x => x.Saved is null):N0}件\n" +
             string.Join("\n", copies.Select(x => x.Saved ?? $"{x.Source}：{x.Error}"));
