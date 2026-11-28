@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Kawattayo.Avalonia</AssemblyName>
+    <Version>0.2.6</Version>
+    <ApplicationIcon>..\src\Assets\folder-bell.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(KawattayoSmoke)' == 'true'">
+    <DefineConstants>$(DefineConstants);KAWATTAYO_SMOKE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Win32" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Skia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.HarfBuzz" Version="12.1.4" />
+    <RuntimeHostConfigurationOption Include="System.Globalization.UseNls" Value="true" Condition="'$(KawattayoUseNls)' == 'true'" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <ProjectReference Include="../src/Windows/Kawattayo.Windows.csproj" />
+    <InternalsVisibleTo Include="Kawattayo.Core.Tests" />
+    <EmbeddedResource Include="../src/Assets/collector.ico" LogicalName="collector.ico" />
+    <EmbeddedResource Include="../src/Assets/folder-bell.ico" LogicalName="folder-bell.ico" />
+  </ItemGroup>
+  <!-- Copy only runtime files; keep existing settings and SQLite data in bin. -->
+  <Target Name="CopyKawattayoPortableFiles" AfterTargets="Publish" Condition="'$(KawattayoCopyToBin)' == 'true'">
+    <ItemGroup>
+      <KawattayoPortableDll Include="$(PublishDir)av_libglesv2.dll;$(PublishDir)libHarfBuzzSharp.dll;$(PublishDir)libSkiaSharp.dll" />
+    </ItemGroup>
+    <PropertyGroup>
+      <KawattayoBin>$(MSBuildProjectDirectory)/../bin</KawattayoBin>
+    </PropertyGroup>
+    <Error Condition="'$(PublishAot)' != 'true' or '$(KawattayoSmoke)' == 'true'" Text="The portable folder requires a non-test Native AOT publish." />
+    <Error Condition="!Exists('$(PublishDir)$(AssemblyName).exe') or !Exists('%(KawattayoPortableDll.Identity)')" Text="A required portable build output is missing. The bin folder was not updated." />
+    <Copy SourceFiles="@(KawattayoPortableDll)" DestinationFolder="$(KawattayoBin)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName).exe" DestinationFiles="$(KawattayoBin)/かわったよ.exe" SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="Executable: $(KawattayoBin)/かわったよ.exe" />
+  </Target>
+</Project>

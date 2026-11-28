@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <TreatNoTestsAsError>true</TreatNoTestsAsError>
+  </RunConfiguration>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura,opencover</Format>
+          <!-- Coverlet does not accept a literal hyphen in an assembly filter. -->
+          <Include>[Kawattayo.Core]*,[Kawattayo.Windows]*,[Kawattayo*cli]*,[Kawattayo.Avalonia]*</Include>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

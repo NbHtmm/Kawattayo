@@ -9,8 +9,9 @@
 *.code-workspace
 *.log
 cache.json*
+settings.json*
 cache.sqlite3*
 *.pubxml*
 .env*
 *.pfx
-*.pem
+*.pem/bin-single/
