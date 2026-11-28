@@ -68,7 +68,17 @@ internal static class FolderProbe
 
     // Assemble a candidate locally. Never modify the last complete snapshot on a failed or cancelled read.
     internal static FolderResult ReadChanges(string root, bool recursive, Dictionary<string,Fingerprint> baseline,
-        string[] paths, Func<string,bool> exclude, CancellationToken cancellation, Action<string>? onEnumerate = null)
+        string[] paths, Func<string,bool> exclude, CancellationToken cancellation, Action<string>? onEnumerate = null) =>
+        ReadChanges(root, recursive, baseline, paths, exclude, cancellation,
+            new(File.GetAttributes, FileProbe.Read, Directory.Exists, FileProbe.ListDirectory), EntryLimit, onEnumerate);
+
+    // The reducer is unchanged when native lookups are replaced with scripted outcomes in UT.
+    internal sealed record ChangeSource(Func<string, FileAttributes> Attributes, Func<string, ProbeResult> ReadFile,
+        Func<string, bool> RootExists, Func<string, int, CancellationToken, List<FileProbe.DirectoryEntry>> List);
+
+    internal static FolderResult ReadChanges(string root, bool recursive, Dictionary<string, Fingerprint> baseline,
+        string[] paths, Func<string, bool> exclude, CancellationToken cancellation, ChangeSource source, int entryLimit,
+        Action<string>? onEnumerate = null)
     {
         var files = new Dictionary<string,Fingerprint>(baseline, StringComparer.OrdinalIgnoreCase);
         HashSet<string>? formerFolders = null;
@@ -81,7 +91,7 @@ internal static class FolderProbe
                 cancellation.ThrowIfCancellationRequested();
                 var relative = Path.GetRelativePath(root,path);
                 if (relative == "." || relative == ".." || relative.StartsWith(@"..\") || Path.IsPathRooted(relative))
-                    return Read(root,recursive,exclude,cancellation);
+                    return ReadInventory(root, recursive, exclude, cancellation, source.List);
                 if (CoveredByParent(relative)) continue;
                 bool CoveredByParent(string name)
                 {
@@ -90,7 +100,7 @@ internal static class FolderProbe
                     return false;
                 }
                 FileAttributes attributes;
-                try { attributes = File.GetAttributes(path); }
+                try { attributes = source.Attributes(path); }
                 catch (IOException ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
                 {
                     sawMissing = true;
@@ -103,7 +113,7 @@ internal static class FolderProbe
                 {
                     RemoveTree(relative);
                     if (recursive)
-                        foreach (var (child,value) in TakeInventory(path, true, exclude, cancellation, FileProbe.ListDirectory, onEnumerate))
+                        foreach (var (child,value) in TakeInventory(path, true, exclude, cancellation, source.List, onEnumerate))
                             files[Path.Combine(relative,child)] = value;
                     covered.Add(relative);
                 }
@@ -113,15 +123,15 @@ internal static class FolderProbe
                     if (recursive && !files.ContainsKey(relative) && WasFolder(relative)) RemoveTree(relative);
                     covered.Add(relative);
                     if (exclude(path)) { files.Remove(relative); continue; }
-                    var result = FileProbe.Read(path);
+                    var result = source.ReadFile(path);
                     if (result.State == ProbeState.Unavailable) return new(null,result.Error);
                     if (result.Fingerprint is {} fp) files[relative] = fp; else RemoveTree(relative);
                 }
-                if (files.Count > EntryLimit) return new(null,"監視範囲の上限を超えました。");
+                if (files.Count > entryLimit) return new(null,"監視範囲の上限を超えました。");
             }
             // 消失ごとに共有ルートへ再照会しない。一覧を公開する前に一度だけ通信断を確認する。
             cancellation.ThrowIfCancellationRequested();
-            if (sawMissing && !Directory.Exists(root)) return new(null, "登録フォルダに接続できません");
+            if (sawMissing && !source.RootExists(root)) return new(null, "登録フォルダに接続できません");
             return new(files);
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException) { return new(null,ex.Message); }
