@@ -10,8 +10,20 @@ internal sealed partial class DesktopWindow
     private Button? __downloadButton;
     private CancellationTokenSource? __downloadStop;
 
-    private static bool CanDownload(Row row) => row is { Folder: false, Path: not null }
+    internal static bool CanDownload(Row row) => row is { Folder: false, Path: not null }
         && row.Change?.Kind != "消失" && (row.Change is not null || row.Target?.LastChange != "消失");
+
+    // Preserve the first eligible occurrence; open mode only accepts a single supported file.
+    internal static Row[] SelectDownloadRows(IEnumerable<Row> selection, bool open)
+    {
+        var rows = selection.Where(CanDownload).DistinctBy(row => row.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+        return open && (rows.Length != 1 || !LocalDownloads.CanOpen(rows[0].Path!)) ? [] : rows;
+    }
+
+    internal static DownloadRequest[] CreateDownloadRequests(Row[] rows) =>
+        rows.Select(row => new DownloadRequest(row.Path!,
+            rows.Length > 1 && row.Change is { } change ? change.Relative : Leaf(row.Path!),
+            SourceRoot: row.Target is { IsFolder: true } target ? target.Path : null)).ToArray();
 
     private void RefreshDownloadButton()
     {
@@ -24,8 +36,8 @@ internal sealed partial class DesktopWindow
     private async Task DownloadRows(Row[] selection, bool open)
     {
         if (__downloadStop is not null || __closing) return;
-        var rows = selection.Where(CanDownload).DistinctBy(row => row.Path, StringComparer.OrdinalIgnoreCase).ToArray();
-        if (rows.Length == 0 || (open && (rows.Length != 1 || !LocalDownloads.CanOpen(rows[0].Path!)))) return;
+        var rows = SelectDownloadRows(selection, open);
+        if (rows.Length == 0) return;
 
         using var stop = new CancellationTokenSource();
         __downloadStop = stop;
@@ -37,8 +49,7 @@ internal sealed partial class DesktopWindow
             if (folders.FirstOrDefault()?.TryGetLocalPath() is not { } folder || __closing || stop.IsCancellationRequested)
                 return;
 
-            var requests = rows.Select(row => new DownloadRequest(row.Path!,
-                rows.Length > 1 && row.Change is { } change ? change.Relative : Leaf(row.Path!), SourceRoot: row.Target is { IsFolder: true } target ? target.Path : null)).ToArray();
+            var requests = CreateDownloadRequests(rows);
             var result = await Task.Run(() => new LocalDownloads().Save(folder, requests, stop.Token));
             if (__closing || __closed) return;
             if (open && result[0].Saved is { } saved && !stop.IsCancellationRequested)
