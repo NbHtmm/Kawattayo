@@ -191,6 +191,111 @@ public sealed class CheckpointsTests
         }
     }
 
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(100, true)]
+    [InlineData(101, false)]
+    public void Create_EnforcesNormalizedLengthBoundary(int length, bool valid)
+    {
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner();
+        int scans = 0;
+        scanner.OnScan = () => scans++;
+        var service = new Checkpoints(repository, scanner, new CopySpy(), TimeProvider.System);
+        string name = new('a', length);
+        string root = Path.GetFullPath("fixture");
+        if (valid)
+        {
+            var point = service.Create(" " + name + " ", root, true, "", CancellationToken.None);
+            Assert.Equal(name, point.Name);
+            Assert.Equal(point, Assert.Single(service.List()));
+            Assert.Equal(1, scans);
+        }
+        else
+        {
+            Assert.Throws<ArgumentException>(() => service.Create(name, root, true, "", CancellationToken.None));
+            Assert.Empty(service.List());
+            Assert.Equal(0, scans);
+        }
+    }
+
+    [Fact]
+    public void Create_InvalidRootRuleOrAlreadyCanceledNeverCallsTheScanner()
+    {
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner { OnScan = () => throw new InvalidOperationException("Unexpected scan.") };
+        var service = new Checkpoints(repository, scanner, new CopySpy(), TimeProvider.System);
+        string root = Path.GetFullPath("fixture");
+
+        Assert.Throws<ArgumentException>(() => service.Create("baseline", "relative", true, "", CancellationToken.None));
+        Assert.Throws<ArgumentException>(() => service.Create("baseline", root, true, "logs/report.txt", CancellationToken.None));
+        Assert.Throws<OperationCanceledException>(() => service.Create("baseline", root, true, "", new(true)));
+        Assert.Empty(service.List());
+    }
+
+    [Fact]
+    public void Compare_MissingBaselineNeverStartsScanning()
+    {
+        var scanner = new ScriptedScanner { OnScan = () => throw new InvalidOperationException("Unexpected scan.") };
+        var service = new Checkpoints(new MemoryRepository(), scanner, new CopySpy(), TimeProvider.System);
+        Assert.Throws<KeyNotFoundException>(() => service.Compare("missing", CancellationToken.None));
+    }
+
+    [Fact]
+    public void Compare_SortsNamesAndDetectsEitherContentIndicatorWithoutMutatingBaseline()
+    {
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner();
+        var service = new Checkpoints(repository, scanner, new CopySpy(), TimeProvider.System);
+        var original = new Fingerprint(1, 2, 3);
+        foreach (var name in new[] { "Zulu.txt", "Alpha.txt", "gone.txt" }) scanner.View.Files[name] = original;
+        string root = Path.GetFullPath("fixture");
+        var point = service.Create("baseline", root, true, "", CancellationToken.None);
+        scanner.View.Files.Remove("gone.txt");
+        scanner.View.Files["Zulu.txt"] = original with { Bytes = 4 };
+        scanner.View.Files["ALPHA.TXT"] = original with { Modified = 20 };
+        scanner.View.Files["beta.txt"] = original;
+
+        var (info, rows) = service.Compare(point.Id, CancellationToken.None);
+
+        Assert.Equal(point, info);
+        Assert.Equal(new[] { "Alpha.txt", "beta.txt", "gone.txt", "Zulu.txt" }, rows.Select(x => x.Relative));
+        Assert.Equal(new[] { DifferenceKind.Updated, DifferenceKind.Added, DifferenceKind.Deleted, DifferenceKind.Updated },
+            rows.Select(x => x.Kind));
+        Assert.Equal(original, repository.Read(point.Id, CancellationToken.None).Files["Zulu.txt"]);
+    }
+
+    [Fact]
+    public void Collect_UnconfirmedAndDeletedDoNotProduceRequests()
+    {
+        var downloads = new CopySpy();
+        var service = new Checkpoints(new MemoryRepository(), new ScriptedScanner(), downloads, TimeProvider.System);
+        var point = new CheckpointInfo("id", "baseline", Path.GetFullPath("fixture"), true, [], DateTimeOffset.UnixEpoch);
+        string output = Path.GetFullPath("export");
+
+        Assert.Empty(service.Collect(point,
+            [new("sub", DifferenceKind.Unconfirmed, null), new("old.txt", DifferenceKind.Deleted, null)],
+            output, CancellationToken.None));
+        Assert.Equal(output, downloads.Output);
+        Assert.Empty(downloads.Requests);
+    }
+
+    [Fact]
+    public void Collect_DestinationUnderSourceIsRejectedBeforeCallingSaver()
+    {
+        var downloads = new CopySpy();
+        var service = new Checkpoints(new MemoryRepository(), new ScriptedScanner(), downloads, TimeProvider.System);
+        var point = new CheckpointInfo("id", "baseline", Path.GetFullPath("fixture"), true, [], DateTimeOffset.UnixEpoch);
+        var changes = new[] { new CheckpointDifference("report.txt", DifferenceKind.Added, new(1, 2, 3)) };
+
+        Assert.Throws<IOException>(() =>
+            service.Collect(point, changes, Path.Combine(point.Root, "export"), CancellationToken.None));
+        Assert.Throws<OperationCanceledException>(() =>
+            service.Collect(point, changes, Path.GetFullPath("export"), new(true)));
+        Assert.Null(downloads.Output);
+    }
+
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
