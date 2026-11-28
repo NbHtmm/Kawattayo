@@ -38,4 +38,30 @@ public sealed class FolderComparisonTests
 
     private static Dictionary<string, Fingerprint> Snapshot(params (string Path, Fingerprint Value)[] entries) =>
         entries.ToDictionary(e => e.Path, e => e.Value, StringComparer.OrdinalIgnoreCase);
+
+    [Fact]
+    public void Compare_AttachesOnlyValidChangedWriteTimesAndSilentlyRebaselinesScope()
+    {
+        var before = Snapshot(("timestamp.txt", s_original), ("future.txt", s_original),
+            ("size.txt", s_original), ("exclude.tmp", s_original));
+        var earlier = s_now.AddMinutes(-1);
+        var after = Snapshot(("timestamp.txt", s_original with { Modified = earlier.ToFileTime() }),
+            ("future.txt", s_original with { Modified = s_now.AddTicks(1).ToFileTime() }),
+            ("size.txt", s_original with { Bytes = 11 }), ("include.tmp", s_original));
+        var result = FolderComparison.Compare(before, after, s_now, ["include.*"], ["exclude.*"])
+            .ToDictionary(change => change.Relative);
+        Assert.Equal(3, result.Count);
+        Assert.Equal(earlier, result["timestamp.txt"].ModifiedAt);
+        Assert.Null(result["future.txt"].ModifiedAt);
+        Assert.Null(result["size.txt"].ModifiedAt);
+        Assert.All(result.Values, item => Assert.Equal(("更新", s_now), (item.Kind, item.DetectedAt)));
+    }
+
+    [Fact]
+    public void Summary_EmptyAndExactPreviewLengthDoNotTruncate()
+    {
+        Assert.Equal("+0 / 更新0 / 消失0：", FolderComparison.Summary([]));
+        string boundary = new('x', 120);
+        Assert.Equal("+0 / 更新0 / 消失1：" + boundary, FolderComparison.Summary([new(boundary, "消失", s_now)]));
+    }
 }

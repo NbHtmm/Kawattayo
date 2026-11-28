@@ -41,4 +41,39 @@ public sealed class FileExclusionsTests
     [Fact]
     public void Matches_NoPatternsDoesNotExcludeFile() =>
         Assert.False(FileExclusions.Matches("folder/report.txt", null));
+
+    [Fact]
+    public void Parse_WhitespaceIsEmptyAndFirstInvalidLineIsReported()
+    {
+        Assert.Empty(FileExclusions.Parse(" \r\n \t "));
+        var error = Assert.Throws<ArgumentException>(() => FileExclusions.Parse("*.txt\nbad/name\nbad:name"));
+        Assert.Contains("bad/name", error.Message);
+        Assert.DoesNotContain("bad:name", error.Message);
+    }
+
+    [Fact]
+    public void Normalize_DropsNullAndInvalidNamesWhilePreservingOrderAndFirstSpelling()
+    {
+        Assert.Equal(new[] { "B?.txt", "a*", "~$*" },
+            FileExclusions.Normalize([null!, " ", "B?.txt", ".", "..", @"bad\path", "bad:name", "a*", "A*", "~$*"]));
+    }
+
+    [Fact]
+    public void Same_HandlesReferenceIdentityAndBothEmptyTransitions()
+    {
+        string[] same = ["*.txt"];
+        Assert.True(FileExclusions.Same(same, same));
+        Assert.True(FileExclusions.Same([], []));
+        Assert.False(FileExclusions.Same(null, same));
+        Assert.False(FileExclusions.Same(same, []));
+    }
+
+    [Fact]
+    public void Matches_HandlesEmptyListsAndMayMatchOnlyTheSecondPattern()
+    {
+        const string path = @"C:\test\REPORT.TMP";
+        Assert.False(FileExclusions.Matches(path, []));
+        Assert.True(FileExclusions.Matches(path, ["*.doc", "r*.tmp"]));
+        Assert.False(FileExclusions.Matches(path, ["*.doc", "*.pdf"]));
+    }
 }
