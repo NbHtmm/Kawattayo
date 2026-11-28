@@ -136,16 +136,21 @@ internal sealed class UpdateHooks : IDisposable
         return start;
     }
 
-    private static void ValidateExecutable(string path)
+    private static void ValidateExecutable(string path) =>
+        ValidateExecutable(path, static drive => new DriveInfo(drive).DriveType, File.Exists, File.GetAttributes);
+
+    // Keep path decisions testable without probing a real drive or launching the configured command.
+    internal static void ValidateExecutable(string path, Func<string, DriveType> driveType,
+        Func<string, bool> fileExists, Func<string, FileAttributes> attributes)
     {
         if (!Path.IsPathFullyQualified(path) || !string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase) ||
-            Path.GetPathRoot(path) is not { Length: 3 } drive || new DriveInfo(drive).DriveType != DriveType.Fixed || !File.Exists(path))
+            Path.GetPathRoot(path) is not { Length: 3 } drive || driveType(drive) != DriveType.Fixed || !fileExists(path))
             throw new IOException("ローカル固定ドライブ上の存在する .exe を選んでください。");
         if (Path.GetFileNameWithoutExtension(path).ToLowerInvariant() is
             "cmd" or "powershell" or "pwsh" or "wscript" or "cscript" or "mshta" or "bash" or "sh" or "wsl")
             throw new IOException("シェルやスクリプトホストは直接指定せず、ファイルを引数に取る実行ファイルを指定してください。");
         for (string? part = path; part is not null; part = Path.GetDirectoryName(part))
-            if ((File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0)
+            if ((attributes(part) & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("リンクやジャンクション経由の実行ファイルは登録できません。");
     }
 
