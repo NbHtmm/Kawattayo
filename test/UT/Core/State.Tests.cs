@@ -63,7 +63,9 @@ public sealed class StateTests
         Assert.Equal(0, item.Revision);
         Assert.Same(before, item.Inventory);
 
+        item.Error = "transient";
         item.SetRecursive(false);
+        Assert.Null(item.Error);
         Assert.Equal(1, item.Revision);
         Assert.False(item.Recursive);
         Assert.Null(item.Inventory);
@@ -236,6 +238,118 @@ public sealed class StateTests
         Assert.DoesNotContain(observed, entry => entry.Change == "消失");
         Assert.Null(item.ObserveFolder(new(after), s_now.AddSeconds(2)));
         Assert.Equal(2, item.Unread);
+    }
+
+
+    [Fact]
+    public void Observe_TransitionsThroughMissingUnchangedAndSizeOnlyUpdate()
+    {
+        var item = new WatchItem { Path = "only.txt" };
+        var events = new List<string>();
+        void Record(string _, string kind) => events.Add(kind);
+        Assert.Null(item.Observe(new(ProbeState.Missing), s_now, Record));
+        Assert.Null(item.Observe(new(ProbeState.Unavailable), s_now, Record));
+        Assert.Equal("確認不可", item.Error);
+        Assert.Equal(ProbeState.Missing, item.Baseline);
+        Assert.Null(item.Observe(new(ProbeState.Missing), s_now, Record));
+        Assert.Null(item.Error);
+        Assert.Equal("出現", item.Observe(new(ProbeState.Found, s_first), s_now, Record));
+        Assert.Null(item.Observe(new(ProbeState.Found, s_first), s_now, Record));
+        Assert.Equal("更新", item.Observe(new(ProbeState.Found, s_first with { Bytes = 12 }), s_now, Record));
+        Assert.Null(item.LastModified);
+        Assert.Equal(s_now.AddMinutes(-3), item.LatestFileWriteAt);
+        Assert.Equal("消失", item.Observe(new(ProbeState.Missing), s_now, Record));
+        Assert.Equal(new[] { "出現", "更新", "消失" }, events);
+        Assert.Equal(3, item.Unread);
+        Assert.Null(item.Fingerprint);
+        Assert.Equal(s_now.AddMinutes(-3), item.LatestFileWriteAt);
+    }
+
+    [Fact]
+    public void ObserveFolder_UsesPreparedChangesAndRestoresMissingLatestTimestamp()
+    {
+        var item = new WatchItem { Path = "watched", IsFolder = true };
+        var inventory = Snapshot(("log.txt", s_first));
+        Assert.Null(item.ObserveFolder(new(inventory), s_now));
+        item.LatestFileWriteAt = null;
+
+        Assert.Null(item.ObserveFolder(new(inventory), s_now, preparedChanges: []));
+        Assert.Equal(s_now.AddMinutes(-3), item.LatestFileWriteAt);
+        Assert.Equal(0, item.Unread);
+
+        var change = new FileChange("log.txt", "更新", s_now, s_now.AddMinutes(-2));
+        Assert.NotNull(item.ObserveFolder(new(Snapshot(("log.txt", s_second))), s_now, preparedChanges: [change]));
+        Assert.Equal(change, Assert.Single(item.PendingFiles).Value);
+        Assert.Equal(s_now.AddMinutes(-2), item.LatestFileWriteAt);
+    }
+
+    [Fact]
+    public void ObserveFolder_DefaultUnavailableMessageAndTimestampSentinelDoNotInventUpdates()
+    {
+        var item = new WatchItem { IsFolder = true };
+        var snapshot = Snapshot(("log.txt", new Fingerprint(0, 0, 4)));
+        Assert.Null(item.ObserveFolder(new(snapshot) { DirectoryStamp = 0 }, s_now));
+        Assert.Null(item.LatestFileWriteAt);
+        Assert.Null(item.ObserveFolder(new(null), s_now));
+        Assert.Equal("フォルダを確認できません", item.Error);
+        Assert.Same(snapshot, item.Inventory);
+        Assert.Null(item.ObserveFolder(new(snapshot), s_now));
+        Assert.Null(item.Error);
+        Assert.Null(item.DirectoryStamp);
+        Assert.Empty(item.PendingFiles);
+    }
+
+    [Fact]
+    public void AcknowledgeFile_StaleCountDoesNotUnderflowAndDetailsUseLongSum()
+    {
+        var item = new WatchItem { Unread = 2 };
+        var entry = new FileChange("first.txt", "更新", s_now, Count: int.MaxValue);
+        item.PendingFiles[entry.Relative] = entry;
+        item.PendingFiles["second.txt"] = new("second.txt", "更新", s_now, Count: int.MaxValue);
+        Assert.Equal(0, item.SavedUnreadWithoutDetails);
+        item.AcknowledgeFile(entry);
+        Assert.Equal(0, item.Unread);
+        Assert.Equal("second.txt", Assert.Single(item.PendingFiles).Key);
+        Assert.NotNull(item.AcknowledgedAt);
+    }
+
+    [Fact]
+    public void CaptureForSave_EmptyStateAndTargetPreserveConfigurationAndCopyCollections()
+    {
+        var state = new AppState { DarkMode = true, Paused = true, PollSeconds = 17 };
+        var initial = state.CaptureForSave();
+        Assert.Empty(initial.Items);
+        Assert.Empty(initial.History);
+        Assert.NotSame(state.Items, initial.Items);
+        Assert.NotSame(state.History, initial.History);
+        Assert.Equal((true, true, 17), (initial.DarkMode, initial.Paused, initial.PollSeconds));
+        var target = new WatchItem { Id = Guid.NewGuid(), Path = "target", IsFolder = false, Unread = 3 };
+        var copy = target.CaptureForSave();
+        Assert.Equal((target.Id, "target", false, 3), (copy.Id, copy.Path, copy.IsFolder, copy.Unread));
+        Assert.NotSame(target.PendingFiles, copy.PendingFiles);
+        Assert.Same(target.PendingFiles.Comparer, copy.PendingFiles.Comparer);
+        Assert.Null(copy.Inventory);
+        Assert.Equal(3, target.SavedUnreadWithoutDetails);
+    }
+
+
+    [Fact]
+    public void ObserveFolder_ReportsDeletionAndNullLatestTimeWithoutMutatingBaselineOnUnchangedScan()
+    {
+        var item = new WatchItem { Path = "watched", IsFolder = true };
+        var original = Snapshot(("log.txt", s_first));
+        item.ObserveFolder(new(original), s_now);
+        var equivalent = Snapshot(("log.txt", s_first));
+        Assert.Null(item.ObserveFolder(new(equivalent), s_now.AddSeconds(1)));
+        Assert.Same(original, item.Inventory);
+        Assert.Equal(s_now.AddSeconds(1), item.LastChecked);
+
+        var removed = Snapshot();
+        Assert.Contains("消失", item.ObserveFolder(new(removed), s_now.AddSeconds(2), notifyDeleted: true)!);
+        Assert.Equal("消失", Assert.Single(item.PendingFiles).Value.Kind);
+        Assert.Null(item.LatestFileWriteAt);
+        Assert.Same(removed, item.Inventory);
+        Assert.Equal(1, item.Unread);
     }
 
     private static Dictionary<string, Fingerprint> Snapshot(params (string Path, Fingerprint Data)[] entries) =>
