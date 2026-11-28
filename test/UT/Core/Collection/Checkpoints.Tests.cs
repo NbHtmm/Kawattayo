@@ -359,6 +359,33 @@ public sealed class CheckpointsTests
         }
     }
 
+    [Fact]
+    public void Collect_DoesNotHandAnyPartOfAnInvalidSelectionToTheSaver()
+    {
+        string parent = Path.GetFullPath("workspace");
+        string root = Path.Combine(parent, "watched");
+        string output = Path.Combine(parent, "export");
+        var point = new CheckpointInfo("id", "trial", root, true, [], DateTimeOffset.UnixEpoch);
+        var repository = new MemoryRepository();
+        var scanner = new ScriptedScanner();
+        var saver = new CopySpy();
+        var service = new Checkpoints(repository, scanner, saver, TimeProvider.System);
+
+        // The first path stays inside the source, but its destination also resolves inside it.
+        // The second path escapes the source. Neither error may publish a partially valid batch.
+        foreach (string invalid in new[] { Path.Combine("..", "watched", "file.txt"), Path.Combine("..", "outside.txt") })
+        {
+            var changes = new CheckpointDifference[]
+            {
+                new("valid.txt", DifferenceKind.Added, new(0, 0, 1)),
+                new(invalid, DifferenceKind.Updated, new(0, 0, 1))
+            };
+            Assert.Throws<IOException>(() => service.Collect(point, changes, output, CancellationToken.None));
+        }
+        Assert.Empty(saver.Requests);
+        Assert.Null(saver.Output);
+    }
+
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
