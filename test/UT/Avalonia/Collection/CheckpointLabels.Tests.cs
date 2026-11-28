@@ -29,4 +29,19 @@ public sealed class CheckpointLabelsTests
         Assert.Equal($"現場 点検 ｜ {date.ToLocalTime():yyyy/MM/dd HH:mm:ss} ｜ {point.Root}",
             CheckpointLabels.Describe(point));
     }
+
+    [Fact]
+    public void Describe_ReportsUnknownKindWithoutDiscardingPathOrDiagnostic()
+    {
+        Assert.Equal("確認不能 ｜ report.txt ｜ metadata error",
+            CheckpointLabels.Describe(new CheckpointDifference("report.txt", (DifferenceKind)100, null, "metadata error")));
+    }
+
+    [Fact]
+    public void Describe_UsesRootCaptionWithoutAnEmptyDiagnosticColumn()
+    {
+        Assert.Equal("更新 ｜ 対象フォルダ",
+            CheckpointLabels.Describe(new CheckpointDifference("", DifferenceKind.Updated, null)));
+    }
+
 }

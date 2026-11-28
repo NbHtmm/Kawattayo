@@ -82,4 +82,31 @@ public sealed class SettingsFileTests
         var source = new AppState { Items = [new() { Path = path }] };
         Assert.Throws<JsonException>(() => SettingsFile.ValidateSettings(source));
     }
+
+    [Theory]
+    [InlineData(5, 1, true)]
+    [InlineData(86400, 300, false)]
+    [InlineData(17, 12, true)]
+    public void ValidateSettings_PreservesValidValuesAndAcceptsAnEmptyList(int poll, int stable, bool recursive)
+    {
+        var source = new AppState { PollSeconds = poll, StableSeconds = stable, RecursiveFolders = recursive, Items = [] };
+
+        Assert.Same(source, SettingsFile.ValidateSettings(source));
+        Assert.Equal(poll, source.PollSeconds);
+        Assert.Equal(stable, source.StableSeconds);
+        Assert.Equal(recursive, source.RecursiveFolders);
+        Assert.Empty(source.Items);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ValidateSettings_WrapsTheNormalizationErrorForEachTargetKind(bool folder)
+    {
+        var source = new AppState { Items = [new() { IsFolder = folder, Path = @"relative\entry" }] };
+
+        Assert.IsAssignableFrom<ArgumentException>(
+            Assert.Throws<JsonException>(() => SettingsFile.ValidateSettings(source)).InnerException);
+    }
+
 }
