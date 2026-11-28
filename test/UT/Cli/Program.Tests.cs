@@ -12,6 +12,7 @@ public sealed class ProgramTests
             ["--name", "--exclude"], ["--no-recursive"]);
         Assert.Equal("記録 と 試験", options.One("--name"));
         Assert.Equal(new[] { "*.tmp", "~$*" }, options.All("--exclude"));
+        Assert.Equal("*.tmp", options.One("--exclude"));
         Assert.True(options.Has("--no-recursive"));
         Assert.False(options.Has("--root"));
         Assert.Empty(options.All("--root"));
@@ -209,6 +210,76 @@ public sealed class ProgramTests
         Assert.Equal(0, fixture.ScanCalls);
         Assert.Empty(fixture.CopyRequests);
         Assert.Empty(text.ToString());
+    }
+
+
+    [Fact]
+    public void Options_EmptyAndCaseVariantsOfKeysRemainDistinct()
+    {
+        var options = new Program.Options([], ["--name"], ["--json"]);
+        Assert.False(options.Has("--json"));
+        Assert.Empty(options.All("--name"));
+        Assert.Throws<ArgumentException>(() => options.One("--name"));
+
+        options = new Program.Options(["--json", "--name", "日報"], ["--name"], ["--json"]);
+        Assert.True(options.Has("--json"));
+        Assert.False(options.Has("--JSON"));
+        Assert.Equal("", Assert.Single(options.All("--json")));
+        Assert.Empty(options.All("--NAME"));
+        Assert.Equal("日報", options.One("--name"));
+    }
+
+    [Fact]
+    public void ChangesAndCopies_EmptyAndKnownKindsHaveStableShape()
+    {
+        using var empty = WriteJson(writer => Program.Copies(writer, [], []));
+        Assert.Empty(empty.RootElement.GetProperty("files").EnumerateArray());
+        Assert.Empty(empty.RootElement.GetProperty("unconfirmed").EnumerateArray());
+        using var documents = WriteJson(writer => Program.Changes(writer,
+            [new("first.txt", DifferenceKind.Added, null), new("second.txt", DifferenceKind.Deleted, null)]));
+        Assert.Equal(new[] { "added", "deleted" },
+            documents.RootElement.EnumerateArray().Select(item => item.GetProperty("kind").GetString()));
+        Assert.All(documents.RootElement.EnumerateArray(), item => Assert.False(item.TryGetProperty("error", out _)));
+    }
+
+    [Fact]
+    public void Run_TextPathsDistinguishEmptySuccessAndCombinedFailure()
+    {
+        var fixture = new CliFixture { CopySucceeds = false };
+        var point = Point("aabb", "baseline");
+        fixture.Save(point, new(), CancellationToken.None);
+        using var output = new StringWriter();
+        string destination = Path.GetFullPath("export");
+        Assert.Equal(0, Program.Run(["diff", "--checkpoint", point.Id], fixture.Points, CancellationToken.None, output, UnexpectedJson));
+        Assert.Equal(0, Program.Run(["collect", "--checkpoint", point.Id, "--output", destination], fixture.Points,
+            CancellationToken.None, output, UnexpectedJson));
+        Assert.Empty(output.ToString());
+
+        fixture.View.Files["report.txt"] = new(1, 2, 3);
+        fixture.View.Errors["missing"] = "offline";
+        Assert.Equal(3, Program.Run(["diff", "--checkpoint", point.Id], fixture.Points, CancellationToken.None, output, UnexpectedJson));
+        var diff = output.ToString();
+        Assert.Contains("追加 ｜ report.txt", diff);
+        Assert.Contains("確認不能 ｜ missing ｜ offline", diff);
+        output.GetStringBuilder().Clear();
+
+        Assert.Equal(3, Program.Run(["collect", "--checkpoint", point.Id, "--output", destination], fixture.Points,
+            CancellationToken.None, output, UnexpectedJson));
+        Assert.Contains("未保存：", output.ToString());
+        Assert.Contains("not copied", output.ToString());
+        Assert.Contains("確認不能 ｜ missing ｜ offline", output.ToString());
+    }
+
+    [Fact]
+    public void Run_UnrecognizedVerbIsUsageAndHasNoSideEffects()
+    {
+        var fixture = new CliFixture();
+        using var output = new StringWriter();
+        Assert.Throws<ArgumentException>(() =>
+            Program.Run(["unknown"], fixture.Points, CancellationToken.None, output, UnexpectedJson));
+        Assert.Empty(output.ToString());
+        Assert.Equal(0, fixture.ScanCalls);
+        Assert.Empty(fixture.CopyRequests);
     }
 
     private static Stream UnexpectedJson() => throw new InvalidOperationException("Text commands must not open JSON output.");
