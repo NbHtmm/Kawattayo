@@ -54,6 +54,13 @@ public sealed class ProgramTests
     }
 
     [Fact]
+    public void Describe_UnknownKindKeepsThePathAndDiagnostic()
+    {
+        var change = new CheckpointDifference("測定.txt", (DifferenceKind)99, null, "未対応の状態");
+        Assert.Equal("確認不能 ｜ 測定.txt ｜ 未対応の状態", Program.Describe(change));
+    }
+
+    [Fact]
     public void Changes_WritesOrderedStableKindsAndOnlyPresentErrors()
     {
         using var document = WriteJson(writer => Program.Changes(writer,
@@ -280,6 +287,68 @@ public sealed class ProgramTests
         Assert.Empty(output.ToString());
         Assert.Equal(0, fixture.ScanCalls);
         Assert.Empty(fixture.CopyRequests);
+    }
+
+    [Fact]
+    public void Run_EmptyListDefaultRecursionAndSuccessfulTextCollect()
+    {
+        var fixture = new CliFixture();
+        using var output = new StringWriter();
+        var stop = CancellationToken.None;
+        string root = Path.GetFullPath("CLI-fixture");
+        string export = Path.GetFullPath("export");
+
+        Assert.Equal(0, Program.Run(["checkpoint", "list"], fixture.Points, stop, output, UnexpectedJson));
+        Assert.Empty(output.ToString());
+        Assert.Equal(0, Program.Run(["checkpoint", "create", "--name", "default", "--root", root],
+            fixture.Points, stop, output, UnexpectedJson));
+        var point = Assert.Single(fixture.List());
+        Assert.True(point.Recursive);
+        output.GetStringBuilder().Clear();
+        fixture.View.Files["日報.txt"] = new(1, 2, 3);
+        Assert.Equal(0, Program.Run(["collect", "--checkpoint", point.Id, "--output", export],
+            fixture.Points, stop, output, UnexpectedJson));
+        Assert.Equal(Path.Combine(export, "日報.txt") + output.NewLine, output.ToString());
+    }
+
+    [Fact]
+    public void Run_InvalidCreationAndUnknownCheckpointDoNotEmitOutputOrStartScanning()
+    {
+        var fixture = new CliFixture();
+        using var output = new StringWriter();
+        var stop = CancellationToken.None;
+        Assert.Throws<ArgumentException>(() => Program.Run(["checkpoint", "create", "--name", "missing root"],
+            fixture.Points, stop, output, UnexpectedJson));
+        Assert.Throws<IOException>(() => Program.Run(["diff", "--checkpoint", "unknown", "--json"],
+            fixture.Points, stop, output, UnexpectedJson));
+        Assert.Empty(output.ToString());
+        Assert.Empty(fixture.List());
+        Assert.Equal(0, fixture.ScanCalls);
+    }
+
+    [Fact]
+    public void Run_JsonOutputErrorsPropagateAndOutputIsDisposed()
+    {
+        var fixture = new CliFixture();
+        var point = Point("aabb", "baseline");
+        fixture.Save(point, new(), CancellationToken.None);
+        using var output = new StringWriter();
+        string[] args = ["diff", "--checkpoint", point.Id, "--json"];
+        Assert.Throws<IOException>(() =>
+            Program.Run(args, fixture.Points, CancellationToken.None, output, () => throw new IOException("closed pipe")));
+        Assert.Empty(output.ToString());
+
+        // JSON 本体を書き出す途中で失敗しても、出力ストリームは RUN の終端で閉じる。
+        using var pipe = new FailingPipe();
+        Assert.Throws<IOException>(() => Program.Run(args, fixture.Points, CancellationToken.None, output, () => pipe));
+        Assert.False(pipe.CanWrite);
+        Assert.Empty(output.ToString());
+    }
+
+    private sealed class FailingPipe : MemoryStream
+    {
+        public override void Write(ReadOnlySpan<byte> buffer) => throw new IOException("broken pipe");
+        public override void Write(byte[] buffer, int offset, int count) => throw new IOException("broken pipe");
     }
 
     private static Stream UnexpectedJson() => throw new InvalidOperationException("Text commands must not open JSON output.");
