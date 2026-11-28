@@ -102,6 +102,91 @@ public sealed class MonitorSessionNotificationsTests
         await fixture.Session.Close();
     }
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public async Task Notification_DeletionClearsPendingUpdatesAndOnlyAlertsWhenEnabled(bool isFolder, bool notifyDeleted)
+    {
+        var clock = new ManualClock();
+        var fixture = new MonitorFixture(clock);
+        fixture.State.WaitForStable = true;
+        fixture.State.StableSeconds = 2;
+        fixture.State.NotifyDeleted = notifyDeleted;
+        fixture.State.RenotifyUnread = true;
+        var target = fixture.AddFile(isFolder ? "folder" : "report.txt");
+        target.IsFolder = isFolder;
+        const string relative = "report.txt";
+        var before = new Fingerprint(10, 1, 1);
+        var after = before with { Bytes = 2 };
+        target.Baseline = ProbeState.Found;
+        if (isFolder) target.Inventory = new() { [relative] = before };
+        else target.Fingerprint = before;
+
+        bool deleted = false;
+        fixture.Observe = (query, _) => isFolder
+            ? new(query.Id, query.Revision, null, new(deleted ? new() : new() { [relative] = after }), DateTimeOffset.UnixEpoch, null)
+            : new(query.Id, query.Revision, new(deleted ? ProbeState.Missing : ProbeState.Found, deleted ? null : after),
+                null, DateTimeOffset.UnixEpoch, null);
+        var alerts = new List<MonitorAlert>();
+        fixture.Session.Alerts += batch => alerts.AddRange(batch);
+
+        await fixture.Session.Scan();
+        Assert.Equal(1, fixture.Session.WaitingNotifications);
+        Assert.Empty(alerts);
+
+        deleted = true;
+        await fixture.Session.Scan();
+        if (notifyDeleted)
+            Assert.Equal(isFolder ? Path.Combine(target.Path, relative) : target.Path, Assert.Single(alerts).Path);
+        else
+            Assert.Empty(alerts);
+        Assert.Equal(0, fixture.Session.WaitingNotifications);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        await fixture.Session.Scan();
+        Assert.Equal(notifyDeleted ? 1 : 0, alerts.Count);
+        await fixture.Session.Close();
+    }
+
+    [Fact]
+    public async Task Notification_FolderChildrenSettleIndependentlyAfterAnotherEdit()
+    {
+        var clock = new ManualClock();
+        var fixture = new MonitorFixture(clock);
+        fixture.State.WaitForStable = true;
+        fixture.State.StableSeconds = 2;
+        var folder = fixture.AddFile("folder");
+        folder.IsFolder = true;
+        var first = new Fingerprint(10, 1, 1);
+        folder.Inventory = new() { ["a.txt"] = first, ["b.txt"] = first };
+        ulong bSize = 2;
+        fixture.Observe = (query, _) => new(query.Id, query.Revision, null,
+            new(new() { ["a.txt"] = first with { Bytes = 2 }, ["b.txt"] = first with { Bytes = bSize } }),
+            DateTimeOffset.UnixEpoch, null);
+        var alerts = new List<MonitorAlert>();
+        fixture.Session.Alerts += batch => alerts.AddRange(batch);
+
+        await fixture.Session.Scan();
+        Assert.Equal(2, fixture.Session.WaitingNotifications);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        bSize++;
+        await fixture.Session.Scan();
+        Assert.Empty(alerts);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await fixture.Session.Scan();
+        Assert.Equal(Path.Combine(folder.Path, "a.txt"), Assert.Single(alerts).Path);
+        Assert.Equal(1, fixture.Session.WaitingNotifications);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await fixture.Session.Scan();
+        Assert.Equal(new[] { Path.Combine(folder.Path, "a.txt"), Path.Combine(folder.Path, "b.txt") },
+            alerts.Select(alert => alert.Path));
+        Assert.Equal(0, fixture.Session.WaitingNotifications);
+        await fixture.Session.Close();
+    }
+
+
     private sealed class ManualClock : TimeProvider
     {
         private long _time;
