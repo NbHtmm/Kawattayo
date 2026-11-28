@@ -189,11 +189,11 @@ internal static class FileProbe
     private static extern bool FindNextFileW(IntPtr handle, out FindData data);
 
     /// @brief 長いローカルパスと UNC パスを Win32 形式へ変換する。
-    private static string ExtendedPath(string path) => path.Length < 248 ? path :
+    internal static string ExtendedPath(string path) => path.Length < 248 ? path :
         path.StartsWith(@"\\") ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
 
     /// @brief FILETIME の上位・下位ワードを結合する。
-    private static long ToLong(FILETIME t) => ((long)t.dwHighDateTime << 32) | (uint)t.dwLowDateTime;
+    internal static long ToLong(FILETIME t) => ((long)t.dwHighDateTime << 32) | (uint)t.dwLowDateTime;
 
     /// @brief Win32 の検索結果と同じ順序・幅の構造体。
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
