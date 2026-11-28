@@ -36,4 +36,25 @@ public sealed class PendingPathLookupTests
     }
 
     private static FileChange Change(string path) => new(path, "更新", DateTimeOffset.UnixEpoch);
+
+    [Fact]
+    public void DuplicatePathKeepsTheFirstRegistrationAndReadFileCanFallBackToFolder()
+    {
+        string root = Path.GetFullPath("watched");
+        string path = Path.Combine(root, "report.txt");
+        var file = new WatchItem { Path = path, Unread = 0 };
+        var duplicate = new WatchItem { Path = path.ToUpperInvariant(), Unread = 1 };
+        var folder = new WatchItem { Path = root, IsFolder = true };
+        var lookup = new PendingPathLookup([file, duplicate, folder]);
+        Assert.False(new PendingPathLookup([]).Contains(path));
+        Assert.False(lookup.Contains(path));
+
+        folder.PendingFiles["report.txt"] = Change("report.txt");
+        Assert.True(lookup.Contains(path));
+
+        // A path registered as a file cannot serve as an ancestor folder.
+        var fileAncestor = new WatchItem { Path = root };
+        fileAncestor.PendingFiles["report.txt"] = Change("report.txt");
+        Assert.False(new PendingPathLookup([fileAncestor]).Contains(path));
+    }
 }

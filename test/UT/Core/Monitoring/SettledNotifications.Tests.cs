@@ -155,4 +155,24 @@ public sealed class SettledNotificationsTests
         Assert.Equal(1, pending.Count);
     }
 
+
+    [Fact]
+    public void Remove_UnknownRelativeKeepsPendingAndRetainEmptyClearsEverything()
+    {
+        var pending = new SettledNotifications();
+        var id = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        Assert.Equal(0, pending.Count);
+        Assert.False(pending.HasPending(id));
+        Assert.Empty(pending.Paths(id));
+
+        pending.Queue(id, "report.txt", "report.txt", "更新");
+        pending.Queue(other, "other.txt", "other.txt", "更新");
+        pending.Remove(id, "not-queued.txt");
+        Assert.Equal(new[] { "report.txt" }, pending.Paths(id));
+        Assert.Equal(2, pending.Count);
+        pending.Retain(new HashSet<Guid>());
+        Assert.Equal(0, pending.Count);
+        Assert.False(pending.HasPending(other));
+    }
 }
